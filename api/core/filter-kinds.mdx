@@ -1,0 +1,318 @@
+---
+title: Filter Kinds
+description: All filter kind types and their usage
+---
+
+Filter kinds are string literal types that identify the operation a filter performs. Each filter kind has specific behavior and input requirements.
+
+## Overview
+
+Every filter in filter-def has a `kind` property that determines its behavior:
+
+```typescript
+interface User {
+  name: string;
+  age: number;
+  email: string;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },        // Equality filter
+  age: { kind: 'gte' },        // Greater-than-or-equal filter
+  email: { kind: 'contains' }, // Substring filter
+});
+```
+
+## Primitive Filter Kinds
+
+Primitive filters operate on individual field values.
+
+### Equality & Inequality
+
+<ParamField path="eq" type="kind">
+  **Equals** - Passes if value is referentially equal to input
+  
+  ```typescript
+  { kind: 'eq' }
+  // Input: any
+  // Example: { status: 'active' }
+  ```
+</ParamField>
+
+<ParamField path="neq" type="kind">
+  **Not Equals** - Passes if value is not referentially equal to input
+  
+  ```typescript
+  { kind: 'neq' }
+  // Input: any
+  // Example: { status: 'deleted' }
+  ```
+</ParamField>
+
+### String Filters
+
+<ParamField path="contains" type="kind">
+  **Contains** - Passes if string value contains the input substring
+  
+  ```typescript
+  { kind: 'contains', caseInsensitive?: boolean }
+  // Input: string
+  // Example: { email: '@example.com' }
+  ```
+  
+  Supports case-insensitive matching with the `caseInsensitive` option.
+</ParamField>
+
+### Array Filters
+
+<ParamField path="inArray" type="kind">
+  **In Array** - Passes if value is contained in the input array
+  
+  ```typescript
+  { kind: 'inArray' }
+  // Input: any[]
+  // Example: { status: ['active', 'pending', 'approved'] }
+  ```
+</ParamField>
+
+### Null Filters
+
+<ParamField path="isNull" type="kind">
+  **Is Null** - Checks if value is null or undefined
+  
+  ```typescript
+  { kind: 'isNull' }
+  // Input: boolean
+  // true → passes if null/undefined
+  // false → passes if not null/undefined
+  ```
+</ParamField>
+
+<ParamField path="isNotNull" type="kind">
+  **Is Not Null** - Checks if value is not null and not undefined
+  
+  ```typescript
+  { kind: 'isNotNull' }
+  // Input: boolean
+  // true → passes if not null/undefined
+  // false → passes if null/undefined
+  ```
+</ParamField>
+
+### Comparison Filters
+
+<ParamField path="gt" type="kind">
+  **Greater Than** - Passes if value is greater than input
+  
+  ```typescript
+  { kind: 'gt' }
+  // Input: number | string | Date
+  // Example: { age: 18 }
+  ```
+  
+  Works with any comparable data type: numbers, strings, dates.
+</ParamField>
+
+<ParamField path="gte" type="kind">
+  **Greater Than or Equal** - Passes if value is greater than or equal to input
+  
+  ```typescript
+  { kind: 'gte' }
+  // Input: number | string | Date
+  // Example: { age: 21 }
+  ```
+</ParamField>
+
+<ParamField path="lt" type="kind">
+  **Less Than** - Passes if value is less than input
+  
+  ```typescript
+  { kind: 'lt' }
+  // Input: number | string | Date
+  // Example: { age: 65 }
+  ```
+</ParamField>
+
+<ParamField path="lte" type="kind">
+  **Less Than or Equal** - Passes if value is less than or equal to input
+  
+  ```typescript
+  { kind: 'lte' }
+  // Input: number | string | Date
+  // Example: { age: 64 }
+  ```
+</ParamField>
+
+## Boolean Filter Kinds
+
+Boolean filters combine multiple primitive filters.
+
+<ParamField path="and" type="kind">
+  **And** - Passes if ALL conditions are met
+  
+  ```typescript
+  {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'age' },
+      { kind: 'eq', field: 'status' },
+    ],
+  }
+  ```
+  
+  All conditions must specify explicit `field` properties.
+</ParamField>
+
+<ParamField path="or" type="kind">
+  **Or** - Passes if AT LEAST ONE condition is met
+  
+  ```typescript
+  {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  }
+  ```
+  
+  All conditions must specify explicit `field` properties.
+</ParamField>
+
+## Complete Example
+
+Here's a comprehensive example using multiple filter kinds:
+
+```typescript
+interface Product {
+  id: string;
+  name: string;
+  description: string;
+  price: number;
+  category: string;
+  tags: string[];
+  inStock: boolean;
+  createdAt: Date;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+  // Equality
+  id: { kind: 'eq' },
+  
+  // String search
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name', caseInsensitive: true },
+      { kind: 'contains', field: 'description', caseInsensitive: true },
+    ],
+  },
+  
+  // Range filter
+  priceRange: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'price' },
+      { kind: 'lte', field: 'price' },
+    ],
+  },
+  
+  // Array membership
+  category: { kind: 'inArray' },
+  
+  // Null check
+  hasDescription: { kind: 'isNotNull', field: 'description' },
+  
+  // Date comparison
+  createdAfter: { kind: 'gte', field: 'createdAt' },
+});
+
+// Usage
+const where = productFilter({
+  search: 'laptop',
+  priceRange: 500,
+  category: ['electronics', 'computers'],
+  hasDescription: true,
+  createdAfter: new Date('2024-01-01'),
+});
+
+const results = allProducts.filter(where);
+```
+
+## Type Constants
+
+```typescript
+import type {
+  CoreFilterKind,
+  PrimitiveFilterKind,
+  BooleanFilterKind,
+} from '@filter-def/core';
+
+// All filter kinds
+type AllKinds = CoreFilterKind;
+// "eq" | "neq" | "contains" | "inArray" | "isNull" | "isNotNull" | "gt" | "gte" | "lt" | "lte" | "and" | "or"
+
+// Just primitive filters
+type PrimitiveKinds = PrimitiveFilterKind;
+// "eq" | "neq" | "contains" | "inArray" | "isNull" | "isNotNull" | "gt" | "gte" | "lt" | "lte"
+
+// Just boolean filters
+type BooleanKinds = BooleanFilterKind;
+// "and" | "or"
+```
+
+## Adapter-Specific Behavior
+
+While all adapters support the same filter kinds, their implementation differs:
+
+<Tabs>
+  <Tab title="In-Memory">
+    ```typescript
+    // Evaluates filters in JavaScript at runtime
+    const where = userFilter({ age: 25 });
+    const users = allUsers.filter(where);
+    ```
+    
+    - Direct value comparison
+    - Case-insensitive uses `toLowerCase()`
+    - Fastest for small datasets
+  </Tab>
+  
+  <Tab title="Drizzle">
+    ```typescript
+    // Generates SQL expressions
+    const where = userFilter({ age: 25 });
+    await db.select().from(usersTable).where(where);
+    ```
+    
+    - Uses `eq()`, `gt()`, `like()`, etc.
+    - Case-insensitive uses `ilike()`
+    - Pushes filtering to database
+  </Tab>
+  
+  <Tab title="BigQuery">
+    ```typescript
+    // Generates parameterized SQL
+    const { sql, params } = userFilter({ age: 25 });
+    await bigquery.query({
+      query: `SELECT * FROM users WHERE ${sql}`,
+      params,
+    });
+    ```
+    
+    - Uses parameterized queries (`@param`)
+    - Case-insensitive uses `LOWER()`
+    - Prevents SQL injection
+  </Tab>
+</Tabs>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Core Types" icon="code" href="/api/core/types">
+    See complete type definitions
+  </Card>
+  <Card title="Custom Filters" icon="wand-magic-sparkles" href="/concepts/custom-filters">
+    Create your own filter kinds
+  </Card>
+</CardGroup>

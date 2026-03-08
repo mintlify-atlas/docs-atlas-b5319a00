@@ -1,0 +1,478 @@
+---
+title: In-Memory Adapter
+description: Filter JavaScript arrays with type-safe predicates
+---
+
+The in-memory adapter transforms filter definitions into predicate functions that work seamlessly with native JavaScript array methods like `filter()`, `find()`, `some()`, and `every()`.
+
+## Installation
+
+<Steps>
+  <Step title="Install the package">
+    ```bash
+    npm install @filter-def/in-memory
+    # or
+    pnpm add @filter-def/in-memory
+    ```
+  </Step>
+</Steps>
+
+## Basic Usage
+
+Define your filters once, then use them with standard array methods:
+
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+interface Product {
+    id: string;
+    name: string;
+    price: number;
+    category: string;
+    inStock: boolean;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+    // Field names match entity properties, so `field` is inferred
+    id: { kind: "eq" },
+    category: { kind: "eq" },
+    inStock: { kind: "eq" },
+
+    // Explicit field names when filter key differs
+    nameContains: { kind: "contains", field: "name" },
+    minPrice: { kind: "gte", field: "price" },
+    maxPrice: { kind: "lte", field: "price" },
+});
+
+const products: Product[] = [
+    { id: "1", name: "Laptop", price: 999, category: "electronics", inStock: true },
+    { id: "2", name: "Phone", price: 699, category: "electronics", inStock: true },
+    { id: "3", name: "Desk", price: 299, category: "furniture", inStock: false },
+];
+
+// Create a predicate function
+const predicate = productFilter({
+    category: "electronics",
+    inStock: true,
+    maxPrice: 800,
+});
+
+// Use with array methods
+const results = products.filter(predicate);
+const first = products.find(predicate);
+const hasAny = products.some(predicate);
+```
+
+## Filter Types
+
+The in-memory adapter supports all standard filter kinds:
+
+| Kind | Description | Example |
+| --- | --- | --- |
+| `eq` | Exact equality | `{ name: { kind: "eq" } }` |
+| `neq` | Not equal | `{ status: { kind: "neq" } }` |
+| `contains` | String contains (case-sensitive by default) | `{ email: { kind: "contains" } }` |
+| `inArray` | Value in array | `{ status: { kind: "inArray" } }` |
+| `gt` | Greater than | `{ age: { kind: "gt" } }` |
+| `gte` | Greater than or equal | `{ price: { kind: "gte" } }` |
+| `lt` | Less than | `{ age: { kind: "lt" } }` |
+| `lte` | Less than or equal | `{ price: { kind: "lte" } }` |
+| `isNull` | Check if null/undefined | `{ deletedAt: { kind: "isNull" } }` |
+| `isNotNull` | Check if not null/undefined | `{ email: { kind: "isNotNull" } }` |
+
+### Case-Insensitive String Matching
+
+Use `caseInsensitive: true` for case-insensitive string matching:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    nameSearch: {
+        kind: "contains",
+        field: "name",
+        caseInsensitive: true,
+    },
+});
+
+const users = [
+    { name: "Alice" },
+    { name: "Bob" },
+    { name: "CHARLIE" },
+];
+
+// Matches "Alice", "CHARLIE"
+const results = users.filter(userFilter({ nameSearch: "ali" }));
+```
+
+## Nested Fields
+
+Filter on deeply nested object properties using dot-separated paths:
+
+```typescript
+interface Employee {
+    name: { first: string; last: string };
+    department: string;
+    address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+    firstName: { kind: "eq", field: "name.first" },
+    lastName: { kind: "eq", field: "name.last" },
+    department: { kind: "eq" },
+    cityContains: {
+        kind: "contains",
+        field: "address.city",
+        caseInsensitive: true,
+    },
+    minLatitude: { kind: "gte", field: "address.geo.lat" },
+});
+
+const employees: Employee[] = [
+    {
+        name: { first: "Alice", last: "Chen" },
+        department: "engineering",
+        address: { city: "Portland", geo: { lat: 45.5, lng: -122.7 } },
+    },
+    {
+        name: { first: "Bob", last: "Smith" },
+        department: "design",
+        address: { city: "Seattle", geo: { lat: 47.6, lng: -122.3 } },
+    },
+];
+
+// Filter by nested fields
+const chenEmployees = employees.filter(employeeFilter({ lastName: "Chen" }));
+const northernEmployees = employees.filter(employeeFilter({ minLatitude: 46 }));
+```
+
+<Note>
+The filter traverses each segment of the dot-separated path at runtime using a `getByPath` helper function.
+</Note>
+
+## Boolean Filters (AND/OR)
+
+Combine multiple conditions with logical operators:
+
+```typescript
+const productFilter = inMemoryFilter<Product>().def({
+    // OR: match any condition
+    searchTerm: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "description" },
+        ],
+    },
+
+    // AND: match all conditions
+    priceRange: {
+        kind: "and",
+        conditions: [
+            { kind: "gte", field: "price" },
+            { kind: "lte", field: "price" },
+        ],
+    },
+});
+
+const results = products.filter(
+    productFilter({
+        searchTerm: "laptop", // Matches name OR description
+        priceRange: 500, // Price >= 500 AND <= 500
+    })
+);
+```
+
+<Warning>
+All conditions in boolean filters must have explicit `field` properties.
+</Warning>
+
+## Custom Filters
+
+Define complex filtering logic with custom functions:
+
+```typescript
+interface BlogPost {
+    id: string;
+    title: string;
+    content: string;
+    author: string;
+    tags: string[];
+    publishedAt: Date;
+    viewCount: number;
+    likeCount: number;
+    commentCount: number;
+}
+
+const postFilter = inMemoryFilter<BlogPost>().def({
+    // Standard primitive filters
+    id: { kind: "eq" },
+    author: { kind: "eq" },
+    titleContains: { kind: "contains", field: "title" },
+
+    // Custom filter: Check if post has a specific tag
+    hasTag: (post: BlogPost, tag: string) => {
+        return post.tags.includes(tag);
+    },
+
+    // Custom filter: Check if post has ALL provided tags
+    hasAllTags: (post: BlogPost, tags: string[]) => {
+        return tags.every((tag) => post.tags.includes(tag));
+    },
+
+    // Custom filter: Published within X days
+    publishedWithinDays: (post: BlogPost, days: number) => {
+        const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        return post.publishedAt >= cutoffDate;
+    },
+
+    // Custom filter: Engagement rate calculation
+    minEngagementRate: (post: BlogPost, minRate: number) => {
+        const engagementRate = (post.likeCount + post.commentCount) / post.viewCount;
+        return engagementRate >= minRate;
+    },
+
+    // Custom filter: Popularity score (weighted calculation)
+    minPopularityScore: (post: BlogPost, minScore: number) => {
+        const score = post.viewCount * 1 + post.likeCount * 5 + post.commentCount * 10;
+        return score >= minScore;
+    },
+});
+
+// Find trending posts
+const trendingPosts = posts.filter(
+    postFilter({
+        publishedWithinDays: 14,
+        minEngagementRate: 0.08,
+        minPopularityScore: 3000,
+    })
+);
+```
+
+### Nested Filters
+
+Filter parent entities based on child array properties:
+
+```typescript
+interface User {
+    name: string;
+    posts: Post[];
+}
+
+interface Post {
+    id: string;
+    title: string;
+}
+
+const postFilter = inMemoryFilter<Post>().def({
+    id: { kind: "eq" },
+    titleContains: { kind: "contains", field: "title" },
+});
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    
+    // Custom filter using another filter
+    wrotePostWithId: (user: User, postId: string) =>
+        user.posts.some(postFilter({ id: postId })),
+    
+    hasPostWithTitle: (user: User, title: string) =>
+        user.posts.some(postFilter({ titleContains: title })),
+});
+
+const authors = users.filter(userFilter({ hasPostWithTitle: "TypeScript" }));
+```
+
+## Helper Functions
+
+The `makeFilterHelpers` function creates convenience wrappers around array methods:
+
+```typescript
+import { inMemoryFilter, makeFilterHelpers } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    isActive: { kind: "eq" },
+});
+
+const {
+    filter: filterUsers,
+    find: findUser,
+    findIndex: findUserIndex,
+    some: someUsers,
+    every: everyUser,
+} = makeFilterHelpers(userFilter);
+
+// Use helper functions
+const activeUsers = filterUsers(users, { isActive: true });
+const john = findUser(users, { name: "John" });
+const johnIndex = findUserIndex(users, { name: "John" });
+const hasActiveUsers = someUsers(users, { isActive: true });
+const allActive = everyUser(users, { isActive: true });
+```
+
+## Type Utilities
+
+### Extract Filter Input Type
+
+Use `InMemoryFilterInput` to extract the input type:
+
+```typescript
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+// { name?: string; minAge?: number }
+
+function searchUsers(filters: UserFilterInput) {
+    return users.filter(userFilter(filters));
+}
+```
+
+### Custom Filter Type
+
+Use `InMemoryCustomFilter` to type custom filter functions:
+
+```typescript
+import type { InMemoryCustomFilter } from "@filter-def/in-memory";
+
+type HasTagFilter = InMemoryCustomFilter<BlogPost, string>;
+// (entity: BlogPost, input: string) => boolean
+
+const hasTag: HasTagFilter = (post, tag) => post.tags.includes(tag);
+```
+
+## Complete Example
+
+Here's a real-world e-commerce search implementation:
+
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+interface Product {
+    id: string;
+    name: string;
+    description: string;
+    price: number;
+    category: string;
+    tags: string[];
+    inStock: boolean;
+    rating: number;
+    reviewCount: number;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+    // Equality filters
+    id: { kind: "eq" },
+    category: { kind: "eq" },
+    inStock: { kind: "eq" },
+
+    // Range filters
+    minPrice: { kind: "gte", field: "price" },
+    maxPrice: { kind: "lte", field: "price" },
+    minRating: { kind: "gte", field: "rating" },
+
+    // Array filters
+    categories: { kind: "inArray", field: "category" },
+
+    // Text search (OR across multiple fields)
+    search: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name", caseInsensitive: true },
+            { kind: "contains", field: "description", caseInsensitive: true },
+        ],
+    },
+
+    // Custom filters
+    hasTag: (product: Product, tag: string) => product.tags.includes(tag),
+    
+    minReviewCount: (product: Product, count: number) => 
+        product.reviewCount >= count,
+    
+    popularityScore: (product: Product, minScore: number) => {
+        const score = product.rating * product.reviewCount;
+        return score >= minScore;
+    },
+});
+
+type ProductFilterInput = InMemoryFilterInput<typeof productFilter>;
+
+// Search function
+function searchProducts(
+    products: Product[],
+    filters: ProductFilterInput
+): Product[] {
+    return products.filter(productFilter(filters));
+}
+
+// Usage examples
+const electronics = searchProducts(products, {
+    category: "electronics",
+    inStock: true,
+    maxPrice: 500,
+});
+
+const popularLaptops = searchProducts(products, {
+    search: "laptop",
+    minRating: 4.0,
+    minReviewCount: 50,
+    inStock: true,
+});
+
+const trendingProducts = searchProducts(products, {
+    popularityScore: 100,
+    minPrice: 200,
+    maxPrice: 1000,
+});
+```
+
+## Features
+
+<CardGroup cols={2}>
+  <Card title="Type-Safe" icon="shield-check">
+    Full TypeScript inference for filter inputs and entity fields
+  </Card>
+  <Card title="Composable" icon="puzzle-piece">
+    Combine multiple filters with AND/OR logic
+  </Card>
+  <Card title="Native Integration" icon="code">
+    Works with `filter()`, `find()`, `some()`, `every()`
+  </Card>
+  <Card title="Custom Logic" icon="gear">
+    Define complex business logic with custom functions
+  </Card>
+  <Card title="Nested Fields" icon="sitemap">
+    Filter on deeply nested properties with dot notation
+  </Card>
+  <Card title="Zero Dependencies" icon="feather">
+    Lightweight and framework-agnostic (only depends on `@filter-def/core`)
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+**Performance Considerations**
+
+The in-memory adapter evaluates filters at runtime for each entity. For large datasets (10,000+ items), consider:
+- Indexing frequently filtered fields
+- Using pagination to limit result sets
+- Moving to a database adapter for server-side filtering
+</Warning>
+
+<Note>
+**Null vs Undefined**
+
+The `isNull` and `isNotNull` filters treat both `null` and `undefined` as null values. If you need to distinguish between them, use a custom filter.
+</Note>
+
+## Related Packages
+
+- [`@filter-def/core`](/api/core/types) - Core types and utilities
+- [`@filter-def/drizzle`](/adapters/drizzle) - Drizzle ORM adapter
+- [`@filter-def/bigquery`](/adapters/bigquery) - BigQuery adapter

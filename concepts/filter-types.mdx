@@ -1,0 +1,462 @@
+---
+title: Filter Types
+description: All primitive filter types supported by filter-def
+---
+
+## Overview
+
+Filter-def supports 10 primitive filter types that work across all adapters. Each filter type has a specific `kind` and expected input type.
+
+## Equality Filters
+
+### eq (Equals)
+
+Passes when the field value equals the filter input value.
+
+```typescript
+interface EqFilter<Entity> {
+  kind: 'eq';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  role: { kind: 'eq' },
+});
+
+const admins = users.filter(userFilter({ role: 'admin' }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  name: { kind: 'eq' },
+  role: { kind: 'eq' },
+});
+
+const where = userFilter({ role: 'admin' });
+await db.select().from(usersTable).where(where);
+```
+
+```typescript BigQuery
+const userFilter = bigqueryFilter<User>().def({
+  name: { kind: 'eq' },
+  role: { kind: 'eq' },
+});
+
+const { sql, params } = userFilter({ role: 'admin' });
+// SQL: role = @role
+```
+</CodeGroup>
+
+### neq (Not Equals)
+
+Passes when the field value does not equal the filter input value.
+
+```typescript
+interface NeqFilter<Entity> {
+  kind: 'neq';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  role: { kind: 'neq' },
+});
+
+const nonAdmins = users.filter(userFilter({ role: 'admin' }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  role: { kind: 'neq' },
+});
+
+const where = userFilter({ role: 'admin' });
+await db.select().from(usersTable).where(where);
+```
+</CodeGroup>
+
+## String Filters
+
+### contains (String Contains)
+
+Passes when the string field contains the filter input substring.
+
+```typescript
+interface ContainsFilter<Entity> {
+  kind: 'contains';
+  field?: FieldPath<Entity>;
+  caseInsensitive?: boolean;
+}
+```
+
+<Note>
+The `caseInsensitive` option enables case-insensitive matching. In Drizzle, this uses `ILIKE` instead of `LIKE`.
+</Note>
+
+<CodeGroup>
+```typescript In-Memory
+const productFilter = inMemoryFilter<Product>().def({
+  nameContains: { kind: 'contains', field: 'name' },
+  emailDomain: { kind: 'contains', field: 'email', caseInsensitive: true },
+});
+
+const laptops = products.filter(
+  productFilter({ nameContains: 'Laptop' })
+);
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  emailDomain: { kind: 'contains', field: 'email', caseInsensitive: true },
+});
+
+const where = userFilter({ emailDomain: '@company.com' });
+// Generates: email ILIKE '%@company.com%'
+```
+
+```typescript BigQuery
+const userFilter = bigqueryFilter<User>().def({
+  nameContains: { kind: 'contains', field: 'name' },
+  emailDomain: { kind: 'contains', field: 'email', caseInsensitive: true },
+});
+
+const { sql, params } = userFilter({ emailDomain: '@company.com' });
+// SQL: LOWER(email) LIKE LOWER(@emailDomain)
+// params: { emailDomain: '%@company.com%' }
+```
+</CodeGroup>
+
+## Array Filters
+
+### inArray (In Array)
+
+Passes when the field value is contained in the filter input array.
+
+```typescript
+interface InArrayFilter<Entity> {
+  kind: 'inArray';
+  field?: FieldPath<Entity>;
+}
+```
+
+**Input Type**: Array of field values
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  role: { kind: 'inArray' },
+  status: { kind: 'inArray' },
+});
+
+const staffUsers = users.filter(
+  userFilter({ role: ['admin', 'moderator', 'editor'] })
+);
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  role: { kind: 'inArray' },
+});
+
+const where = userFilter({ role: ['admin', 'moderator'] });
+await db.select().from(usersTable).where(where);
+```
+
+```typescript BigQuery
+const userFilter = bigqueryFilter<User>().def({
+  role: { kind: 'inArray' },
+});
+
+const { sql, params } = userFilter({ role: ['admin', 'moderator'] });
+// SQL: role IN UNNEST(@role)
+// params: { role: ['admin', 'moderator'] }
+```
+</CodeGroup>
+
+## Null Filters
+
+### isNull (Is Null)
+
+Passes when the field value is `null` or `undefined`.
+
+```typescript
+interface IsNullFilter<Entity> {
+  kind: 'isNull';
+  field?: FieldPath<Entity>;
+}
+```
+
+**Input Type**: `boolean`
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  hasPhone: { kind: 'isNull', field: 'phone' },
+});
+
+// Find users without phone numbers
+const noPhone = users.filter(userFilter({ hasPhone: true }));
+
+// Find users with phone numbers (inverted)
+const withPhone = users.filter(userFilter({ hasPhone: false }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  hasPhone: { kind: 'isNull', field: 'phone' },
+});
+
+const where = userFilter({ hasPhone: true });
+// Generates: phone IS NULL
+```
+</CodeGroup>
+
+### isNotNull (Is Not Null)
+
+Passes when the field value is not `null` and not `undefined`.
+
+```typescript
+interface IsNotNullFilter<Entity> {
+  kind: 'isNotNull';
+  field?: FieldPath<Entity>;
+}
+```
+
+**Input Type**: `boolean`
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  hasPhone: { kind: 'isNotNull', field: 'phone' },
+});
+
+// Find users with phone numbers
+const withPhone = users.filter(userFilter({ hasPhone: true }));
+
+// Find users without phone numbers (inverted)
+const noPhone = users.filter(userFilter({ hasPhone: false }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  hasPhone: { kind: 'isNotNull', field: 'phone' },
+});
+
+const where = userFilter({ hasPhone: true });
+// Generates: phone IS NOT NULL
+```
+</CodeGroup>
+
+<Info>
+Both `isNull` and `isNotNull` accept a boolean input. When `true`, the filter applies as expected. When `false`, the logic is inverted.
+</Info>
+
+## Comparison Filters
+
+Comparison filters work with any comparable data type: numbers, strings, dates, etc.
+
+### gt (Greater Than)
+
+Passes when the field value is greater than the filter input value.
+
+```typescript
+interface GTFilter<Entity> {
+  kind: 'gt';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const productFilter = inMemoryFilter<Product>().def({
+  minPrice: { kind: 'gt', field: 'price' },
+});
+
+const expensive = products.filter(productFilter({ minPrice: 1000 }));
+```
+
+```typescript Drizzle
+const productFilter = drizzleFilter(productsTable).def({
+  minPrice: { kind: 'gt', field: 'price' },
+});
+
+const where = productFilter({ minPrice: 1000 });
+// Generates: price > 1000
+```
+</CodeGroup>
+
+### gte (Greater Than or Equal)
+
+Passes when the field value is greater than or equal to the filter input value.
+
+```typescript
+interface GTEFilter<Entity> {
+  kind: 'gte';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  minAge: { kind: 'gte', field: 'age' },
+});
+
+const adults = users.filter(userFilter({ minAge: 18 }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  minAge: { kind: 'gte', field: 'age' },
+});
+
+const where = userFilter({ minAge: 18 });
+// Generates: age >= 18
+```
+</CodeGroup>
+
+### lt (Less Than)
+
+Passes when the field value is less than the filter input value.
+
+```typescript
+interface LTFilter<Entity> {
+  kind: 'lt';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const productFilter = inMemoryFilter<Product>().def({
+  maxPrice: { kind: 'lt', field: 'price' },
+});
+
+const affordable = products.filter(productFilter({ maxPrice: 100 }));
+```
+
+```typescript Drizzle
+const productFilter = drizzleFilter(productsTable).def({
+  maxPrice: { kind: 'lt', field: 'price' },
+});
+
+const where = productFilter({ maxPrice: 100 });
+// Generates: price < 100
+```
+</CodeGroup>
+
+### lte (Less Than or Equal)
+
+Passes when the field value is less than or equal to the filter input value.
+
+```typescript
+interface LTEFilter<Entity> {
+  kind: 'lte';
+  field?: FieldPath<Entity>;
+}
+```
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  maxAge: { kind: 'lte', field: 'age' },
+});
+
+const youngUsers = users.filter(userFilter({ maxAge: 30 }));
+```
+
+```typescript Drizzle
+const userFilter = drizzleFilter(usersTable).def({
+  maxAge: { kind: 'lte', field: 'age' },
+});
+
+const where = userFilter({ maxAge: 30 });
+// Generates: age <= 30
+```
+</CodeGroup>
+
+## Range Filters
+
+Combine comparison filters to create range filters:
+
+```typescript
+const productFilter = inMemoryFilter<Product>().def({
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+});
+
+// Find products between $100 and $500
+const midRange = products.filter(
+  productFilter({ minPrice: 100, maxPrice: 500 })
+);
+```
+
+<CodeGroup>
+```typescript Date Ranges
+const eventFilter = inMemoryFilter<Event>().def({
+  startDate: { kind: 'gte', field: 'date' },
+  endDate: { kind: 'lte', field: 'date' },
+});
+
+const events = allEvents.filter(eventFilter({
+  startDate: new Date('2024-01-01'),
+  endDate: new Date('2024-12-31'),
+}));
+```
+
+```typescript Age Ranges
+const userFilter = inMemoryFilter<User>().def({
+  minAge: { kind: 'gte', field: 'age' },
+  maxAge: { kind: 'lte', field: 'age' },
+});
+
+const targetDemo = users.filter(userFilter({ minAge: 25, maxAge: 45 }));
+```
+</CodeGroup>
+
+## Filter Type Reference
+
+| Kind | Description | Input Type | Example |
+|------|-------------|------------|----------|
+| `eq` | Exact equality | Field type | `{ name: 'John' }` |
+| `neq` | Not equal | Field type | `{ role: 'guest' }` |
+| `contains` | String contains substring | `string` | `{ emailContains: '@company.com' }` |
+| `inArray` | Value in array | `Field type[]` | `{ role: ['admin', 'moderator'] }` |
+| `isNull` | Is null/undefined | `boolean` | `{ hasPhone: true }` |
+| `isNotNull` | Is not null/undefined | `boolean` | `{ hasEmail: true }` |
+| `gt` | Greater than | Field type | `{ minPrice: 100 }` |
+| `gte` | Greater than or equal | Field type | `{ minAge: 18 }` |
+| `lt` | Less than | Field type | `{ maxPrice: 500 }` |
+| `lte` | Less than or equal | Field type | `{ maxAge: 65 }` |
+
+## Type Definitions
+
+All filter type interfaces are exported from `@filter-def/core`:
+
+```typescript
+import type {
+  EqFilter,
+  NeqFilter,
+  ContainsFilter,
+  InArrayFilter,
+  IsNullFilter,
+  IsNotNullFilter,
+  GTFilter,
+  GTEFilter,
+  LTFilter,
+  LTEFilter,
+  PrimitiveFilter,
+} from '@filter-def/core';
+```
+
+## Next Steps
+
+- [Boolean Filters](/concepts/boolean-filters) - Combine filters with AND/OR logic
+- [Custom Filters](/concepts/custom-filters) - Define custom filter functions
+- [Filter Definitions](/concepts/filter-definitions) - Learn more about defining filters

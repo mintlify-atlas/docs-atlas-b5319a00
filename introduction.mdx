@@ -1,0 +1,350 @@
+---
+title: Introduction
+description: Type-safe data filters that work across multiple backends
+---
+
+## What is filter-def?
+
+filter-def is a TypeScript library that lets you define type-safe data filters once and use them across different data backends. Write your filter logic in one place, then apply it to in-memory arrays, SQL databases via Drizzle ORM, or BigQuery - all with full type inference.
+
+<CodeGroup>
+
+```typescript In-Memory
+import { inMemoryFilter } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+const results = users.filter(
+    userFilter({ name: "John", minAge: 18 })
+);
+```
+
+```typescript Drizzle ORM
+import { drizzleFilter } from "@filter-def/drizzle";
+
+const userFilter = drizzleFilter(usersTable).def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+const where = userFilter({ name: "John", minAge: 18 });
+const results = await db.select().from(usersTable).where(where);
+```
+
+```typescript BigQuery
+import { bigqueryFilter } from "@filter-def/bigquery";
+
+const userFilter = bigqueryFilter<User>().def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+const where = userFilter({ name: "John", minAge: 18 });
+const [rows] = await bigquery.query({
+    query: `SELECT * FROM \`dataset.users\` WHERE ${where.sql}`,
+    params: where.params,
+});
+```
+
+</CodeGroup>
+
+## Key Benefits
+
+<CardGroup cols={2}>
+
+<Card title="Type Safety" icon="shield-check">
+  Full TypeScript inference for filter inputs and entity fields. Catch errors at compile time, not runtime.
+</Card>
+
+<Card title="Backend Agnostic" icon="arrows-left-right">
+  Define filters once, use them with in-memory arrays, SQL databases, or BigQuery. Zero lock-in.
+</Card>
+
+<Card title="Composable" icon="layer-group">
+  Combine filters with AND/OR logic. Build complex queries from simple, reusable pieces.
+</Card>
+
+<Card title="Zero Dependencies" icon="feather">
+  Lightweight and framework-agnostic. Each adapter depends only on its target backend.
+</Card>
+
+</CardGroup>
+
+## Core Features
+
+### Type-Safe Filter Definitions
+
+Define filters with full TypeScript inference. The library automatically infers field types from your entity schema and validates filter inputs at compile time.
+
+```typescript
+interface User {
+    name: string;
+    email: string;
+    age: number;
+    isActive: boolean;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },              // infers string
+    emailContains: { kind: "contains", field: "email" },  // infers string
+    minAge: { kind: "gte", field: "age" },  // infers number
+});
+
+// TypeScript knows the exact shape of filter inputs
+const predicate = userFilter({
+    name: "John",        // ✓ string
+    emailContains: "@example.com",  // ✓ string
+    minAge: 18,          // ✓ number
+    // minAge: "18",     // ✗ Type error: string not assignable to number
+});
+```
+
+### Field Inference
+
+When a filter name matches a field name, the `field` property is automatically inferred:
+
+```typescript
+const filter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },     // field: "name" inferred
+    email: { kind: "contains" },  // field: "email" inferred
+    minAge: { kind: "gte", field: "age" },  // explicit field required
+});
+```
+
+### Nested Field Access
+
+Filter on deeply nested object properties using dot-separated paths:
+
+```typescript
+interface Employee {
+    name: { first: string; last: string };
+    address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+    firstName: { kind: "eq", field: "name.first" },
+    city: { kind: "contains", field: "address.city" },
+    minLat: { kind: "gte", field: "address.geo.lat" },
+});
+```
+
+<Note>
+Nested fields are supported by `@filter-def/in-memory` and `@filter-def/bigquery`. The Drizzle adapter does not support nested fields since it operates on flat table columns.
+</Note>
+
+### Boolean Logic (AND/OR)
+
+Combine multiple conditions with logical operators:
+
+```typescript
+const filter = inMemoryFilter<User>().def({
+    // OR: match any condition
+    searchTerm: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "email" },
+        ],
+    },
+
+    // AND: match all conditions
+    ageRange: {
+        kind: "and",
+        conditions: [
+            { kind: "gte", field: "age" },
+            { kind: "lte", field: "age" },
+        ],
+    },
+});
+
+const results = users.filter(
+    filter({
+        searchTerm: "john",
+        ageRange: [18, 65],  // min and max
+    })
+);
+```
+
+### Custom Filter Logic
+
+Define complex business logic with custom filter functions. Each adapter supports custom filters with adapter-specific implementations:
+
+<CodeGroup>
+
+```typescript In-Memory
+const filter = inMemoryFilter<User>().def({
+    hasRole: (user, role: string) => user.roles.includes(role),
+});
+```
+
+```typescript Drizzle
+const filter = drizzleFilter(usersTable).def({
+    ageDivisibleBy: (divisor: number) =>
+        sql`${usersTable.age} % ${divisor} = 0`,
+});
+```
+
+```typescript BigQuery
+const filter = bigqueryFilter<User>().def({
+    ageDivisibleBy: (divisor: number) => ({
+        sql: "MOD(age, @divisor) = 0",
+        params: { divisor },
+    }),
+});
+```
+
+</CodeGroup>
+
+## Use Cases
+
+<AccordionGroup>
+
+<Accordion title="API Query Parameters">
+  Build REST or GraphQL APIs with consistent filtering across endpoints. Define filter schemas once and use them for both validation and data fetching.
+
+  ```typescript
+  const userFilter = inMemoryFilter<User>().def({
+      name: { kind: "contains" },
+      minAge: { kind: "gte", field: "age" },
+      isActive: { kind: "eq" },
+  });
+
+  app.get("/api/users", async (req, res) => {
+      const { name, minAge, isActive } = req.query;
+      const where = userFilter({ name, minAge, isActive });
+      const users = await db.select().from(usersTable).where(where);
+      res.json(users);
+  });
+  ```
+</Accordion>
+
+<Accordion title="Data Migration & Testing">
+  Use the same filter logic for in-memory testing and production databases. Prototype with arrays, deploy with SQL.
+
+  ```typescript
+  // Development: test with in-memory data
+  const memoryFilter = inMemoryFilter<User>().def({
+      isActive: { kind: "eq" },
+  });
+  const testUsers = mockUsers.filter(memoryFilter({ isActive: true }));
+
+  // Production: query database with same logic
+  const dbFilter = drizzleFilter(usersTable).def({
+      isActive: { kind: "eq" },
+  });
+  const prodUsers = await db.select()
+      .from(usersTable)
+      .where(dbFilter({ isActive: true }));
+  ```
+</Accordion>
+
+<Accordion title="Multi-Backend Applications">
+  Build applications that support multiple data sources. Use PostgreSQL for transactional data and BigQuery for analytics with the same filter definitions.
+
+  ```typescript
+  // Shared filter schema
+  const filterDef = {
+      createdAfter: { kind: "gte", field: "createdAt" },
+      status: { kind: "eq" },
+  };
+
+  // Query PostgreSQL via Drizzle
+  const pgFilter = drizzleFilter(ordersTable).def(filterDef);
+  const recentOrders = await db.select()
+      .from(ordersTable)
+      .where(pgFilter({ createdAfter: yesterday }));
+
+  // Query BigQuery for analytics
+  const bqFilter = bigqueryFilter<Order>().def(filterDef);
+  const where = bqFilter({ createdAfter: lastMonth });
+  const [analytics] = await bigquery.query({
+      query: `SELECT status, COUNT(*) FROM orders WHERE ${where.sql} GROUP BY status`,
+      params: where.params,
+  });
+  ```
+</Accordion>
+
+<Accordion title="E-commerce Product Search">
+  Build complex product filtering with price ranges, category filters, and full-text search across multiple fields.
+
+  ```typescript
+  interface Product {
+      name: string;
+      description: string;
+      price: number;
+      category: string;
+      inStock: boolean;
+  }
+
+  const productFilter = inMemoryFilter<Product>().def({
+      search: {
+          kind: "or",
+          conditions: [
+              { kind: "contains", field: "name" },
+              { kind: "contains", field: "description" },
+          ],
+      },
+      priceRange: {
+          kind: "and",
+          conditions: [
+              { kind: "gte", field: "price" },
+              { kind: "lte", field: "price" },
+          ],
+      },
+      category: { kind: "eq" },
+      inStock: { kind: "eq" },
+  });
+
+  const results = products.filter(
+      productFilter({
+          search: "laptop",
+          priceRange: [500, 2000],
+          inStock: true,
+      })
+  );
+  ```
+</Accordion>
+
+</AccordionGroup>
+
+## Available Packages
+
+<CardGroup cols={2}>
+
+<Card title="@filter-def/core" icon="cube" href="/api/core/types">
+  Core types and utilities for building custom adapters
+</Card>
+
+<Card title="@filter-def/in-memory" icon="memory" href="/adapters/in-memory">
+  Filter JavaScript arrays with native array methods
+</Card>
+
+<Card title="@filter-def/drizzle" icon="database" href="/adapters/drizzle">
+  Generate SQL WHERE clauses for Drizzle ORM
+</Card>
+
+<Card title="@filter-def/bigquery" icon="cloud" href="/adapters/bigquery">
+  Create parameterized BigQuery SQL queries
+</Card>
+
+</CardGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Installation" icon="download" href="/installation">
+  Install filter-def packages for your project
+</Card>
+
+<Card title="Quick Start" icon="rocket" href="/quickstart">
+  Build your first filter in 5 minutes
+</Card>
+
+</CardGroup>

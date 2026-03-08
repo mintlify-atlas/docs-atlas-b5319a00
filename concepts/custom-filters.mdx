@@ -1,0 +1,540 @@
+---
+title: Custom Filters
+description: Create adapter-specific custom filter functions for complex business logic
+---
+
+## Overview
+
+Custom filters allow you to define complex filtering logic that goes beyond the built-in primitive filter types. Each adapter has its own custom filter signature tailored to its execution model.
+
+## Custom Filter Signatures
+
+Custom filters are defined as functions in your filter definition. The function signature varies by adapter:
+
+<Tabs>
+  <Tab title="In-Memory">
+    ```typescript
+    type InMemoryCustomFilter<Entity, Input> = (
+      entity: Entity,
+      input: Input
+    ) => boolean;
+    ```
+    
+    Returns `true` if the entity passes the filter.
+  </Tab>
+  <Tab title="Drizzle">
+    ```typescript
+    import type { SQL } from 'drizzle-orm';
+    
+    type DrizzleCustomFilter<Input> = (
+      input: Input
+    ) => SQL | undefined;
+    ```
+    
+    Returns a Drizzle SQL expression or `undefined` to skip filtering.
+  </Tab>
+  <Tab title="BigQuery">
+    ```typescript
+    interface BigQueryFilterResult {
+      sql: string;
+      params: Record<string, unknown>;
+    }
+    
+    type BigQueryCustomFilter<Input> = (
+      input: Input
+    ) => BigQueryFilterResult;
+    ```
+    
+    Returns parameterized SQL with params object.
+  </Tab>
+</Tabs>
+
+## In-Memory Custom Filters
+
+In-memory custom filters receive the entity being tested and the filter input value, returning a boolean.
+
+### Basic Example
+
+```typescript
+import { inMemoryFilter } from '@filter-def/in-memory';
+
+interface User {
+  name: string;
+  roles: string[];
+  createdAt: Date;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  // Primitive filters
+  name: { kind: 'eq' },
+  
+  // Custom filter: check if user has a specific role
+  hasRole: (user: User, role: string) => {
+    return user.roles.includes(role);
+  },
+  
+  // Custom filter: check if user was created within X days
+  createdWithinDays: (user: User, days: number) => {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return user.createdAt >= cutoff;
+  },
+});
+
+// Usage
+const admins = users.filter(userFilter({ hasRole: 'admin' }));
+const recentUsers = users.filter(userFilter({ createdWithinDays: 30 }));
+```
+
+### Complex Business Logic
+
+Custom filters can implement arbitrarily complex logic:
+
+```typescript
+interface BlogPost {
+  title: string;
+  content: string;
+  tags: string[];
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  publishedAt: Date;
+}
+
+const postFilter = inMemoryFilter<BlogPost>().def({
+  // Check if post has ALL of the provided tags
+  hasAllTags: (post: BlogPost, tags: string[]) => {
+    return tags.every(tag => post.tags.includes(tag));
+  },
+  
+  // Calculate engagement rate
+  minEngagementRate: (post: BlogPost, minRate: number) => {
+    const rate = (post.likeCount + post.commentCount) / post.viewCount;
+    return rate >= minRate;
+  },
+  
+  // Complex popularity score
+  minPopularityScore: (post: BlogPost, minScore: number) => {
+    const score = post.viewCount * 1 
+                + post.likeCount * 5 
+                + post.commentCount * 10;
+    return score >= minScore;
+  },
+  
+  // Word count threshold
+  minWordCount: (post: BlogPost, minWords: number) => {
+    const wordCount = post.content.split(/\s+/).length;
+    return wordCount >= minWords;
+  },
+  
+  // Published in date range
+  publishedBetween: (post: BlogPost, range: { start: Date; end: Date }) => {
+    return post.publishedAt >= range.start && post.publishedAt <= range.end;
+  },
+});
+
+// Combine multiple custom filters
+const featured = posts.filter(postFilter({
+  hasAllTags: ['tutorial', 'typescript'],
+  minEngagementRate: 0.1,
+  minPopularityScore: 5000,
+  minWordCount: 500,
+}));
+```
+
+### Accessing External Data
+
+Custom filters can access closures and external data:
+
+```typescript
+const currentUser = getCurrentUser();
+const blockedUserIds = await getBlockedUsers(currentUser.id);
+
+const postFilter = inMemoryFilter<Post>().def({
+  // Filter out posts from blocked users
+  notBlocked: (post: Post, apply: boolean) => {
+    if (!apply) return true;
+    return !blockedUserIds.includes(post.authorId);
+  },
+  
+  // Compare with another post
+  betterThan: (post: Post, otherPostId: string) => {
+    const otherPost = posts.find(p => p.id === otherPostId);
+    if (!otherPost) return false;
+    return post.viewCount > otherPost.viewCount;
+  },
+});
+```
+
+## Drizzle Custom Filters
+
+Drizzle custom filters return SQL expressions using Drizzle's query builder.
+
+### Basic SQL Expressions
+
+```typescript
+import { drizzleFilter } from '@filter-def/drizzle';
+import { pgTable, text, integer } from 'drizzle-orm/pg-core';
+import { sql } from 'drizzle-orm';
+
+const usersTable = pgTable('users', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  age: integer('age').notNull(),
+});
+
+const userFilter = drizzleFilter(usersTable).def({
+  // Primitive filter
+  name: { kind: 'eq' },
+  
+  // Custom filter: age divisible by X
+  ageDivisibleBy: (divisor: number) => 
+    sql`${usersTable.age} % ${divisor} = 0`,
+  
+  // Custom filter: name length
+  nameLongerThan: (length: number) => 
+    sql`length(${usersTable.name}) > ${length}`,
+});
+
+const where = userFilter({ ageDivisibleBy: 5 });
+await db.select().from(usersTable).where(where);
+```
+
+### Complex SQL Logic
+
+```typescript
+import { and, gte, lte, eq } from 'drizzle-orm';
+
+const postsTable = pgTable('posts', {
+  id: integer('id').primaryKey(),
+  title: text('title').notNull(),
+  content: text('content').notNull(),
+  viewCount: integer('view_count').notNull(),
+  likeCount: integer('like_count').notNull(),
+  commentCount: integer('comment_count').notNull(),
+  publishedAt: timestamp('published_at').notNull(),
+  isPublished: boolean('is_published').notNull(),
+});
+
+const postFilter = drizzleFilter(postsTable).def({
+  // Published within X days
+  publishedWithinDays: (days: number) =>
+    sql`${postsTable.publishedAt} >= NOW() - INTERVAL '${sql.raw(String(days))} days'`,
+  
+  // Date range using Drizzle operators
+  publishedBetween: (range: { start: Date; end: Date }) =>
+    and(
+      gte(postsTable.publishedAt, range.start),
+      lte(postsTable.publishedAt, range.end)
+    ),
+  
+  // Minimum engagement (likes + comments)
+  minEngagement: (minTotal: number) =>
+    sql`${postsTable.likeCount} + ${postsTable.commentCount} >= ${minTotal}`,
+  
+  // Popularity score calculation
+  minPopularityScore: (minScore: number) =>
+    sql`(
+      ${postsTable.viewCount} * 1 + 
+      ${postsTable.likeCount} * 5 + 
+      ${postsTable.commentCount} * 10
+    ) >= ${minScore}`,
+  
+  // Word count (PostgreSQL specific)
+  minWordCount: (minWords: number) =>
+    sql`array_length(regexp_split_to_array(${postsTable.content}, '\\s+'), 1) >= ${minWords}`,
+});
+
+const where = postFilter({
+  publishedWithinDays: 30,
+  minEngagement: 50,
+  minPopularityScore: 3000,
+});
+
+await db.select().from(postsTable).where(where);
+```
+
+### Conditional Filters
+
+Return `undefined` to skip a filter conditionally:
+
+```typescript
+const postFilter = drizzleFilter(postsTable).def({
+  optionalStatus: (status: 'published' | 'draft' | 'all') =>
+    status === 'all'
+      ? undefined  // Skip filtering when "all" selected
+      : eq(postsTable.isPublished, status === 'published'),
+});
+
+const allPosts = postFilter({ optionalStatus: 'all' });
+// Returns: undefined (no WHERE clause)
+
+const publishedOnly = postFilter({ optionalStatus: 'published' });
+// Returns: is_published = true
+```
+
+<Info>
+Returning `undefined` from a custom filter tells Drizzle to skip that condition entirely, as if the filter wasn't provided.
+</Info>
+
+## BigQuery Custom Filters
+
+BigQuery custom filters return parameterized SQL with a params object.
+
+### Basic Parameterized SQL
+
+```typescript
+import { bigqueryFilter } from '@filter-def/bigquery';
+
+interface User {
+  id: string;
+  name: string;
+  age: number;
+}
+
+const userFilter = bigqueryFilter<User>().def({
+  // Primitive filter
+  name: { kind: 'eq' },
+  
+  // Custom filter: age divisible by X
+  ageDivisibleBy: (divisor: number) => ({
+    sql: 'MOD(age, @divisor) = 0',
+    params: { divisor },
+  }),
+  
+  // Custom filter: name length
+  nameLongerThan: (length: number) => ({
+    sql: 'LENGTH(name) > @length',
+    params: { length },
+  }),
+});
+
+const { sql, params } = userFilter({ ageDivisibleBy: 5 });
+const [rows] = await bigquery.query({
+  query: `SELECT * FROM \`dataset.users\` WHERE ${sql}`,
+  params,
+});
+```
+
+### Complex BigQuery Functions
+
+```typescript
+interface BlogPost {
+  title: string;
+  content: string;
+  tags: string[];  // ARRAY<STRING> in BigQuery
+  viewCount: number;
+  likeCount: number;
+  commentCount: number;
+  publishedAt: Date;
+}
+
+const postFilter = bigqueryFilter<BlogPost>().def({
+  // Array contains element
+  hasTag: (tag: string) => ({
+    sql: '@tag IN UNNEST(tags)',
+    params: { tag },
+  }),
+  
+  // Array contains all elements
+  hasAllTags: (tags: string[]) => ({
+    sql: `(
+      SELECT COUNT(DISTINCT tag) = @tagCount
+      FROM UNNEST(@tags) AS tag
+      WHERE tag IN UNNEST(tags)
+    )`,
+    params: { tags, tagCount: tags.length },
+  }),
+  
+  // Date arithmetic
+  publishedWithinDays: (days: number) => ({
+    sql: 'publishedAt >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)',
+    params: { days },
+  }),
+  
+  // Engagement rate calculation
+  minEngagementRate: (minRate: number) => ({
+    sql: '(likeCount + commentCount) / viewCount >= @minRate',
+    params: { minRate },
+  }),
+  
+  // String array manipulation
+  minWordCount: (minWords: number) => ({
+    sql: 'ARRAY_LENGTH(SPLIT(content, " ")) >= @minWords',
+    params: { minWords },
+  }),
+  
+  // Complex calculation
+  minPopularityScore: (minScore: number) => ({
+    sql: '(viewCount * 1 + likeCount * 5 + commentCount * 10) >= @minScore',
+    params: { minScore },
+  }),
+});
+
+const { sql, params } = postFilter({
+  hasTag: 'typescript',
+  publishedWithinDays: 30,
+  minEngagementRate: 0.1,
+});
+```
+
+### Multiple Parameters
+
+```typescript
+const eventFilter = bigqueryFilter<Event>().def({
+  inDateRange: (range: { start: string; end: string }) => ({
+    sql: 'eventDate BETWEEN @startDate AND @endDate',
+    params: {
+      startDate: range.start,
+      endDate: range.end,
+    },
+  }),
+  
+  inPriceRange: (range: { min: number; max: number }) => ({
+    sql: 'price >= @minPrice AND price <= @maxPrice',
+    params: {
+      minPrice: range.min,
+      maxPrice: range.max,
+    },
+  }),
+});
+```
+
+## Combining Custom and Primitive Filters
+
+Custom filters work seamlessly alongside primitive filters:
+
+```typescript
+const postFilter = inMemoryFilter<BlogPost>().def({
+  // Primitive filters
+  author: { kind: 'eq' },
+  titleContains: { kind: 'contains', field: 'title' },
+  
+  // Custom filters
+  hasTag: (post: BlogPost, tag: string) => post.tags.includes(tag),
+  minEngagementRate: (post: BlogPost, minRate: number) => {
+    const rate = (post.likeCount + post.commentCount) / post.viewCount;
+    return rate >= minRate;
+  },
+});
+
+// Mix primitive and custom filters
+const results = posts.filter(postFilter({
+  author: 'Alice',              // Primitive filter
+  titleContains: 'TypeScript',  // Primitive filter
+  hasTag: 'tutorial',           // Custom filter
+  minEngagementRate: 0.1,       // Custom filter
+}));
+```
+
+## Type Inference
+
+Custom filters maintain full type safety:
+
+```typescript
+const postFilter = inMemoryFilter<BlogPost>().def({
+  hasAllTags: (post: BlogPost, tags: string[]) => 
+    tags.every(tag => post.tags.includes(tag)),
+  
+  publishedBetween: (post: BlogPost, range: { start: Date; end: Date }) => 
+    post.publishedAt >= range.start && post.publishedAt <= range.end,
+});
+
+// TypeScript infers input types
+type FilterInput = InMemoryFilterInput<typeof postFilter>;
+// {
+//   hasAllTags?: string[];
+//   publishedBetween?: { start: Date; end: Date };
+// }
+
+// ✅ Valid
+postFilter({ hasAllTags: ['typescript', 'tutorial'] });
+postFilter({ publishedBetween: { start: new Date(), end: new Date() } });
+
+// ❌ TypeScript errors
+postFilter({ hasAllTags: 'invalid' });  // Error: must be string[]
+postFilter({ publishedBetween: 'invalid' });  // Error: wrong type
+```
+
+## Best Practices
+
+### Use Primitive Filters First
+
+Only use custom filters when primitive filters can't express the logic:
+
+```typescript
+// ❌ Unnecessary custom filter
+const bad = inMemoryFilter<User>().def({
+  isActive: (user: User, active: boolean) => user.isActive === active,
+});
+
+// ✅ Use primitive filter
+const good = inMemoryFilter<User>().def({
+  isActive: { kind: 'eq' },
+});
+```
+
+### Keep Functions Pure
+
+For in-memory filters, avoid side effects:
+
+```typescript
+// ❌ Side effects in filter
+let count = 0;
+const bad = inMemoryFilter<User>().def({
+  countUsers: (user: User) => {
+    count++;  // Don't do this!
+    return true;
+  },
+});
+
+// ✅ Pure function
+const good = inMemoryFilter<User>().def({
+  isActive: (user: User, active: boolean) => user.isActive === active,
+});
+```
+
+### Parameterize SQL Properly
+
+For BigQuery, always use parameterized queries:
+
+```typescript
+// ❌ SQL injection risk
+const bad = bigqueryFilter<User>().def({
+  nameIs: (name: string) => ({
+    sql: `name = '${name}'`,  // Dangerous!
+    params: {},
+  }),
+});
+
+// ✅ Parameterized query
+const good = bigqueryFilter<User>().def({
+  nameIs: (name: string) => ({
+    sql: 'name = @name',
+    params: { name },
+  }),
+});
+```
+
+## Limitations
+
+<Warning>
+Custom filters cannot be used inside boolean filters (AND/OR). Boolean filters only accept primitive filter conditions.
+</Warning>
+
+```typescript
+// ❌ Not supported
+const invalid = inMemoryFilter<User>().def({
+  complex: {
+    kind: 'or',
+    conditions: [
+      (user: User, value: string) => user.name === value,  // Error
+    ],
+  },
+});
+```
+
+## Next Steps
+
+- [Boolean Filters](/concepts/boolean-filters) - Combine conditions with AND/OR
+- [Type Inference](/concepts/type-inference) - Extract types from filters
+- [Filter Definitions](/concepts/filter-definitions) - Learn more about filter structure

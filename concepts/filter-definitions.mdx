@@ -1,0 +1,273 @@
+---
+title: Filter Definitions
+description: Learn how to define type-safe filters using the .def() method and field inference
+---
+
+## Overview
+
+Filter definitions are the core of `filter-def`. They specify what fields can be filtered and how. Once defined, a filter can be reused across your application with full TypeScript type safety.
+
+## The .def() Method
+
+Every adapter provides a `.def()` method to create filter definitions. The method accepts a filter definition object where each key represents a filterable input parameter.
+
+<Tabs>
+  <Tab title="In-Memory">
+    ```typescript
+    import { inMemoryFilter } from '@filter-def/in-memory';
+
+    interface User {
+      id: string;
+      name: string;
+      email: string;
+      age: number;
+    }
+
+    const userFilter = inMemoryFilter<User>().def({
+      name: { kind: 'eq' },
+      emailContains: { kind: 'contains', field: 'email' },
+      minAge: { kind: 'gte', field: 'age' },
+    });
+
+    // Use the filter
+    const users: User[] = [/* ... */];
+    const filtered = users.filter(userFilter({ name: 'John', minAge: 18 }));
+    ```
+  </Tab>
+  <Tab title="Drizzle">
+    ```typescript
+    import { drizzleFilter } from '@filter-def/drizzle';
+    import { pgTable, text, integer } from 'drizzle-orm/pg-core';
+
+    const usersTable = pgTable('users', {
+      id: integer('id').primaryKey(),
+      name: text('name').notNull(),
+      email: text('email').notNull(),
+      age: integer('age').notNull(),
+    });
+
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      emailContains: { kind: 'contains', field: 'email' },
+      minAge: { kind: 'gte', field: 'age' },
+    });
+
+    // Use the filter
+    const where = userFilter({ name: 'John', minAge: 18 });
+    await db.select().from(usersTable).where(where);
+    ```
+  </Tab>
+  <Tab title="BigQuery">
+    ```typescript
+    import { bigqueryFilter } from '@filter-def/bigquery';
+
+    interface User {
+      id: string;
+      name: string;
+      email: string;
+      age: number;
+    }
+
+    const userFilter = bigqueryFilter<User>().def({
+      name: { kind: 'eq' },
+      emailContains: { kind: 'contains', field: 'email' },
+      minAge: { kind: 'gte', field: 'age' },
+    });
+
+    // Use the filter
+    const where = userFilter({ name: 'John', minAge: 18 });
+    const [rows] = await bigquery.query({
+      query: `SELECT * FROM \`dataset.users\` WHERE ${where.sql}`,
+      params: where.params,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Filter Definition Structure
+
+Each filter definition is an object where:
+
+- **Key**: The input parameter name (e.g., `emailContains`, `minAge`)
+- **Value**: A filter specification object with a `kind` property
+
+```typescript
+const filterDef = {
+  // Filter key: filter specification
+  name: { kind: 'eq' },                      // Simple equality
+  minAge: { kind: 'gte', field: 'age' },     // Greater than or equal
+  emailContains: { kind: 'contains', field: 'email' },  // String search
+};
+```
+
+## Field Inference
+
+When a filter key matches an entity field name, the `field` property is optional and will be automatically inferred:
+
+```typescript
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+  // ✅ Field inferred from key
+  name: { kind: 'eq' },          // field: 'name' is automatic
+  category: { kind: 'eq' },      // field: 'category' is automatic
+  price: { kind: 'gte' },        // field: 'price' is automatic
+  
+  // ✅ Explicit field when key differs
+  nameContains: { kind: 'contains', field: 'name' },
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+});
+```
+
+<Info>
+Field inference makes definitions more concise while maintaining type safety. TypeScript will validate that inferred field names exist on your entity type.
+</Info>
+
+## Multiple Filters on Same Field
+
+You can create multiple filters targeting the same entity field with different filter keys:
+
+```typescript
+const productFilter = inMemoryFilter<Product>().def({
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  exactPrice: { kind: 'eq', field: 'price' },
+});
+
+// Create a price range filter
+const filtered = products.filter(
+  productFilter({ minPrice: 100, maxPrice: 500 })
+);
+```
+
+This pattern is useful for:
+- Price ranges (`minPrice`, `maxPrice`)
+- Date ranges (`startDate`, `endDate`)
+- Numeric boundaries (`minAge`, `maxAge`)
+
+## Using Filter Definitions
+
+Once defined, filters are called with an input object. All filter parameters are optional:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  emailContains: { kind: 'contains', field: 'email' },
+  minAge: { kind: 'gte', field: 'age' },
+});
+
+// All parameters optional
+userFilter()                                    // No filtering
+userFilter({})                                  // No filtering
+userFilter({ name: 'John' })                    // Filter by name only
+userFilter({ name: 'John', minAge: 18 })        // Multiple filters (AND logic)
+```
+
+<Note>
+When no filter values are provided or all values are `undefined`, the filter passes all entities/rows.
+</Note>
+
+## Type Safety
+
+Filter definitions provide complete TypeScript type safety:
+
+```typescript
+const productFilter = inMemoryFilter<Product>().def({
+  name: { kind: 'eq' },
+  minPrice: { kind: 'gte', field: 'price' },
+});
+
+// ✅ Valid
+productFilter({ name: 'Laptop' });
+productFilter({ minPrice: 100 });
+productFilter({ name: 'Laptop', minPrice: 100 });
+
+// ❌ TypeScript errors
+productFilter({ name: 123 });           // Error: name must be string
+productFilter({ minPrice: 'invalid' }); // Error: minPrice must be number
+productFilter({ invalid: true });       // Error: 'invalid' not in filter def
+```
+
+## Validation at Definition Time
+
+The `ValidateFilterDef` type ensures filters are correctly defined:
+
+```typescript
+// ❌ Compile-time error: 'firstName' is not a field on User
+const invalidFilter = inMemoryFilter<User>().def({
+  firstName: { kind: 'eq' },  // Error: must specify field or match entity field
+});
+
+// ✅ Fixed with explicit field
+const validFilter = inMemoryFilter<User>().def({
+  firstName: { kind: 'eq', field: 'name' },
+});
+```
+
+<Warning>
+For boolean filters (AND/OR), all conditions must have explicit `field` properties. See [Boolean Filters](/concepts/boolean-filters) for details.
+</Warning>
+
+## Reusable Filters
+
+Filter definitions are highly reusable. Define once, use everywhere:
+
+```typescript
+// Define in a shared module
+export const productFilter = inMemoryFilter<Product>().def({
+  name: { kind: 'eq' },
+  category: { kind: 'eq' },
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  inStock: { kind: 'eq' },
+});
+
+// Use throughout your application
+// products.ts
+const inStockProducts = products.filter(productFilter({ inStock: true }));
+
+// api-handler.ts
+app.get('/products', (req) => {
+  const filtered = products.filter(productFilter(req.query));
+  res.json(filtered);
+});
+
+// components/ProductList.tsx
+const filteredProducts = products.filter(
+  productFilter({ category: selectedCategory, inStock: true })
+);
+```
+
+## Cross-Adapter Compatibility
+
+Filter definitions use the same syntax across all adapters. You can switch adapters with minimal code changes:
+
+```typescript
+// Same filter definition structure
+const filterDef = {
+  name: { kind: 'eq' },
+  minAge: { kind: 'gte', field: 'age' },
+};
+
+// In-memory adapter
+const memoryFilter = inMemoryFilter<User>().def(filterDef);
+
+// Drizzle adapter (same definition!)
+const drizzleFilter = drizzleFilter(usersTable).def(filterDef);
+
+// BigQuery adapter (same definition!)
+const bqFilter = bigqueryFilter<User>().def(filterDef);
+```
+
+## Next Steps
+
+- [Filter Types](/concepts/filter-types) - Learn about all available primitive filters
+- [Boolean Filters](/concepts/boolean-filters) - Combine conditions with AND/OR logic
+- [Custom Filters](/concepts/custom-filters) - Define adapter-specific custom logic
+- [Nested Fields](/concepts/nested-fields) - Filter on nested object properties

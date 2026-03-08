@@ -1,0 +1,435 @@
+---
+title: Boolean Filters
+description: Combine filter conditions with AND/OR logic
+---
+
+## Overview
+
+Boolean filters allow you to combine multiple filter conditions using AND and OR logic. They enable complex filtering scenarios like "search across multiple fields" or "match all criteria."
+
+## OR Filters
+
+An `or` filter passes when **at least one** of its conditions is met.
+
+```typescript
+interface OrFilter<Entity> {
+  kind: 'or';
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+```
+
+### Basic OR Example
+
+Search for users by name OR email:
+
+<CodeGroup>
+```typescript In-Memory
+import { inMemoryFilter } from '@filter-def/in-memory';
+
+interface User {
+  name: string;
+  email: string;
+  phone: string;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  searchTerm: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+const users: User[] = [
+  { name: 'Alice Johnson', email: 'alice@company.com', phone: '555-0101' },
+  { name: 'Bob Smith', email: 'bob@external.org', phone: '555-0102' },
+];
+
+// Matches users with "company" in name OR email
+const results = users.filter(userFilter({ searchTerm: 'company' }));
+// Returns: Alice (has "company" in email)
+```
+
+```typescript Drizzle
+import { drizzleFilter } from '@filter-def/drizzle';
+import { pgTable, text } from 'drizzle-orm/pg-core';
+
+const usersTable = pgTable('users', {
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  phone: text('phone'),
+});
+
+const userFilter = drizzleFilter(usersTable).def({
+  searchTerm: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+const where = userFilter({ searchTerm: 'company' });
+// Generates: (name LIKE '%company%' OR email LIKE '%company%')
+await db.select().from(usersTable).where(where);
+```
+
+```typescript BigQuery
+import { bigqueryFilter } from '@filter-def/bigquery';
+
+const userFilter = bigqueryFilter<User>().def({
+  searchTerm: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+const { sql, params } = userFilter({ searchTerm: 'company' });
+// SQL: (name LIKE @searchTerm_0 OR email LIKE @searchTerm_1)
+// params: { searchTerm_0: '%company%', searchTerm_1: '%company%' }
+```
+</CodeGroup>
+
+### Multiple OR Conditions
+
+OR filters can have more than two conditions:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  contactInfo: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+      { kind: 'contains', field: 'phone' },
+    ],
+  },
+});
+
+// Matches if "555" appears in name, email, OR phone
+const results = users.filter(userFilter({ contactInfo: '555' }));
+```
+
+### OR with Different Filter Types
+
+You can combine different primitive filter types in OR conditions:
+
+```typescript
+interface User {
+  email: string;
+  phone: string | null;
+  isVerified: boolean;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  contactable: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'email' },      // Has company email
+      { kind: 'isNotNull', field: 'phone' },     // OR has phone
+    ],
+  },
+});
+
+const reachable = users.filter(
+  userFilter({ contactable: '@company.com' })
+);
+```
+
+## AND Filters
+
+An `and` filter passes when **all** of its conditions are met.
+
+```typescript
+interface AndFilter<Entity> {
+  kind: 'and';
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+```
+
+### Basic AND Example
+
+Require multiple conditions to all be true:
+
+```typescript
+interface User {
+  name: string;
+  email: string;
+  isActive: boolean;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  strictMatch: {
+    kind: 'and',
+    conditions: [
+      { kind: 'eq', field: 'isActive' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+// Must be active AND have company email
+const strictResults = users.filter(
+  userFilter({ strictMatch: true })
+);
+```
+
+<Info>
+Note that when you pass `true` to the filter, it applies to the first condition (`isActive`). The second condition uses the same input value for the contains check.
+</Info>
+
+### AND for Complex Validation
+
+```typescript
+interface Product {
+  price: number;
+  inStock: boolean;
+  category: string;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+  premiumAvailable: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'price' },     // Price >= threshold
+      { kind: 'eq', field: 'inStock' },    // AND in stock
+    ],
+  },
+});
+
+const available = products.filter(
+  productFilter({ premiumAvailable: 500 })
+);
+// Returns products that cost >= 500 AND are in stock
+```
+
+## Combining with Other Filters
+
+Boolean filters work seamlessly with primitive filters. Multiple filter keys are implicitly combined with AND logic:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  role: { kind: 'eq' },
+  isActive: { kind: 'eq' },
+  
+  // OR filter for search
+  searchTerm: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+// ALL of these must be true:
+// - role = 'admin'
+// - isActive = true  
+// - (name contains 'alice' OR email contains 'alice')
+const results = users.filter(userFilter({
+  role: 'admin',
+  isActive: true,
+  searchTerm: 'alice',
+}));
+```
+
+## Required Field Properties
+
+<Warning>
+All conditions in boolean filters (AND/OR) **must** have explicit `field` properties. This is validated at compile time.
+</Warning>
+
+```typescript
+// ❌ Invalid: conditions missing field properties
+const invalidFilter = inMemoryFilter<User>().def({
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains' },  // Error: missing field property
+      { kind: 'contains' },  // Error: missing field property
+    ],
+  },
+});
+
+// ✅ Valid: all conditions have explicit fields
+const validFilter = inMemoryFilter<User>().def({
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+```
+
+This requirement ensures type safety and prevents ambiguity in boolean filter conditions.
+
+## Real-World Examples
+
+### Multi-Field Search
+
+```typescript
+const blogFilter = inMemoryFilter<BlogPost>().def({
+  query: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'title' },
+      { kind: 'contains', field: 'content' },
+      { kind: 'contains', field: 'author' },
+    ],
+  },
+  isPublished: { kind: 'eq' },
+});
+
+const searchResults = posts.filter(blogFilter({
+  query: 'typescript',
+  isPublished: true,
+}));
+// Returns published posts with "typescript" in title, content, or author
+```
+
+### Flexible Contact Filtering
+
+```typescript
+interface Contact {
+  email: string;
+  phone: string | null;
+  preferredContact: 'email' | 'phone';
+}
+
+const contactFilter = inMemoryFilter<Contact>().def({
+  hasEmailOrPhone: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'email' },
+      { kind: 'isNotNull', field: 'phone' },
+    ],
+  },
+  preferredContact: { kind: 'eq' },
+});
+
+const emailReachable = contacts.filter(contactFilter({
+  hasEmailOrPhone: '@company.com',
+  preferredContact: 'email',
+}));
+```
+
+### Role-Based Access
+
+```typescript
+interface User {
+  role: string;
+  permissions: string[];
+  isActive: boolean;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  canAccess: {
+    kind: 'or',
+    conditions: [
+      { kind: 'eq', field: 'role' },           // Is admin
+      { kind: 'contains', field: 'permissions' }, // OR has permission
+    ],
+  },
+  isActive: { kind: 'eq' },
+});
+
+const authorized = users.filter(userFilter({
+  canAccess: 'admin',  // admin role OR has 'admin' in permissions
+  isActive: true,
+}));
+```
+
+## Boolean Filter Behavior
+
+### Empty Conditions
+
+Boolean filters require at least one condition (enforced by TypeScript):
+
+```typescript
+// ❌ Compile error: conditions array must have at least 1 element
+const invalid = inMemoryFilter<User>().def({
+  search: {
+    kind: 'or',
+    conditions: [],  // Error
+  },
+});
+```
+
+### Single Condition
+
+Boolean filters with a single condition are valid but redundant:
+
+```typescript
+// Valid but unnecessary - just use the condition directly
+const userFilter = inMemoryFilter<User>().def({
+  emailSearch: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+// Better: use primitive filter directly
+const betterFilter = inMemoryFilter<User>().def({
+  emailSearch: { kind: 'contains', field: 'email' },
+});
+```
+
+## Type Definitions
+
+```typescript
+import type { AndFilter, OrFilter, BooleanFilter } from '@filter-def/core';
+
+// Union of AND and OR filters
+type BooleanFilter<Entity> = AndFilter<Entity> | OrFilter<Entity>;
+
+// AND filter
+interface AndFilter<Entity> {
+  kind: 'and';
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+
+// OR filter
+interface OrFilter<Entity> {
+  kind: 'or';
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+```
+
+## Limitations
+
+<Warning>
+Boolean filters cannot be nested. You cannot have an OR filter inside an AND filter, or vice versa.
+</Warning>
+
+```typescript
+// ❌ Not supported: nested boolean filters
+const invalid = inMemoryFilter<User>().def({
+  complex: {
+    kind: 'and',
+    conditions: [
+      {
+        kind: 'or',  // Cannot nest boolean filters
+        conditions: [/* ... */],
+      },
+    ],
+  },
+});
+```
+
+For complex nested logic, use [Custom Filters](/concepts/custom-filters) instead.
+
+## Next Steps
+
+- [Custom Filters](/concepts/custom-filters) - Define complex custom filter logic
+- [Filter Types](/concepts/filter-types) - Review all primitive filter types
+- [Filter Definitions](/concepts/filter-definitions) - Learn more about filter structure

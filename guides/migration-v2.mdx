@@ -1,0 +1,376 @@
+---
+title: Migration to v2
+description: Guide for migrating from filter-def v1 to v2
+---
+
+## Overview
+
+Version 2.0 of filter-def introduced breaking changes to simplify the API and improve type safety. This guide will help you migrate your existing v1 code to v2.
+
+## Breaking Changes
+
+### Type Name Changes
+
+The most significant changes in v2 are type naming simplifications:
+
+<Warning>
+All public-facing type names were simplified in v2 for better developer experience.
+</Warning>
+
+| v1 Type | v2 Type | Description |
+|---------|---------|-------------|
+| `PredicateCreator` | `Filter` | Main filter function type |
+| `InputForPredicateCreator<T>` | `FilterInput<T>` | Type for filter inputs |
+
+#### Before (v1):
+
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InputForPredicateCreator } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+// Type extraction in v1
+type UserFilterInput = InputForPredicateCreator<typeof userFilter>;
+```
+
+#### After (v2):
+
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+// Type extraction in v2
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+```
+
+### Adapter-Specific Type Names
+
+Each adapter now exports its own input type utility:
+
+<CodeGroup>
+
+```typescript In-Memory
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({ /* ... */ });
+type UserInput = InMemoryFilterInput<typeof userFilter>;
+```
+
+```typescript Drizzle
+import type { DrizzleFilterInput } from "@filter-def/drizzle";
+
+const userFilter = drizzleFilter(usersTable).def({ /* ... */ });
+type UserInput = DrizzleFilterInput<typeof userFilter>;
+```
+
+```typescript BigQuery
+import type { BigQueryFilterInput } from "@filter-def/bigquery";
+
+const userFilter = bigqueryFilter<User>().def({ /* ... */ });
+type UserInput = BigQueryFilterInput<typeof userFilter>;
+```
+
+</CodeGroup>
+
+### Null and Undefined Handling
+
+In v2.0, filter inputs no longer accept `null` or `undefined` as explicit values for better type safety:
+
+#### Before (v1):
+
+```typescript
+// This was allowed in v1
+const where = userFilter({
+    name: null, // Accepted but confusing behavior
+});
+```
+
+#### After (v2):
+
+```typescript
+// In v2, null/undefined inputs are type errors
+const where = userFilter({
+    // name: null, // ❌ Type error in v2
+});
+
+// Simply omit the field instead
+const where = userFilter({
+    // Empty object or omit undefined fields
+});
+```
+
+<Tip>
+If you need to check for null values, use the `isNull` or `isNotNull` filter kinds instead of passing `null` as a filter value.
+</Tip>
+
+## Migration Steps
+
+<Steps>
+
+<Step title="Update Package Versions">
+
+Update all filter-def packages to v2 in your `package.json`:
+
+```bash
+pnpm update @filter-def/core @filter-def/in-memory @filter-def/drizzle @filter-def/bigquery
+```
+
+Or manually:
+
+```json package.json
+{
+  "dependencies": {
+    "@filter-def/in-memory": "^2.0.0",
+    "@filter-def/drizzle": "^2.0.0",
+    "@filter-def/bigquery": "^2.0.0"
+  }
+}
+```
+
+</Step>
+
+<Step title="Update Type Imports">
+
+Find and replace all type imports:
+
+```typescript
+// Find:
+import type { InputForPredicateCreator } from "@filter-def/in-memory";
+
+// Replace with:
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+```
+
+For Drizzle:
+
+```typescript
+// Find:
+import type { InputForPredicateCreator } from "@filter-def/drizzle";
+
+// Replace with:
+import type { DrizzleFilterInput } from "@filter-def/drizzle";
+```
+
+For BigQuery:
+
+```typescript
+// Find:
+import type { InputForPredicateCreator } from "@filter-def/bigquery";
+
+// Replace with:
+import type { BigQueryFilterInput } from "@filter-def/bigquery";
+```
+
+</Step>
+
+<Step title="Update Type Aliases">
+
+Update all type alias definitions:
+
+```typescript
+// Before (v1)
+type UserFilterInput = InputForPredicateCreator<typeof userFilter>;
+
+// After (v2)
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+// or DrizzleFilterInput / BigQueryFilterInput depending on adapter
+```
+
+</Step>
+
+<Step title="Remove Null Filter Values">
+
+Search for any code passing `null` or `undefined` as filter values and remove them:
+
+```typescript
+// Before (v1)
+const results = users.filter(
+    userFilter({
+        name: searchTerm ?? null, // Remove null fallback
+        minAge: ageFilter ?? undefined, // Remove undefined fallback
+    })
+);
+
+// After (v2)
+const filterInput: Partial<UserFilterInput> = {};
+if (searchTerm) filterInput.name = searchTerm;
+if (ageFilter) filterInput.minAge = ageFilter;
+
+const results = users.filter(userFilter(filterInput));
+
+// Or use object spreading
+const results = users.filter(
+    userFilter({
+        ...(searchTerm && { name: searchTerm }),
+        ...(ageFilter && { minAge: ageFilter }),
+    })
+);
+```
+
+</Step>
+
+<Step title="Test Your Changes">
+
+Run your type checker and tests:
+
+```bash
+tsc --noEmit
+npm test
+```
+
+Fix any type errors that appear. Most errors will be related to:
+- Old type names that need updating
+- Null/undefined values being passed to filters
+
+</Step>
+
+</Steps>
+
+## New Features in v2
+
+While migrating, consider adopting these new v2 features:
+
+### Nested Field Support
+
+v2 adds support for nested field paths in `@filter-def/in-memory` and `@filter-def/bigquery`:
+
+```typescript
+interface Employee {
+    name: { first: string; last: string };
+    address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+    firstName: { kind: "eq", field: "name.first" },
+    city: { kind: "contains", field: "address.city" },
+    minLat: { kind: "gte", field: "address.geo.lat" },
+});
+
+const results = employees.filter(
+    employeeFilter({
+        firstName: "John",
+        city: "New York",
+        minLat: 40.7,
+    })
+);
+```
+
+<Note>
+Nested fields are **not** supported in `@filter-def/drizzle` as Drizzle operates on flat table columns.
+</Note>
+
+### Case-Insensitive Contains
+
+The `contains` filter now supports case-insensitive matching:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    emailContains: {
+        kind: "contains",
+        field: "email",
+        caseInsensitive: true, // New in v2
+    },
+});
+
+const results = users.filter(
+    userFilter({
+        emailContains: "EXAMPLE", // Matches "example", "Example", "EXAMPLE", etc.
+    })
+);
+```
+
+## Troubleshooting
+
+### Type Errors After Migration
+
+<Accordion title="Error: Cannot find name 'InputForPredicateCreator'">
+
+You need to update your type imports. Replace:
+
+```typescript
+import type { InputForPredicateCreator } from "@filter-def/in-memory";
+```
+
+With the adapter-specific type:
+
+```typescript
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+// or DrizzleFilterInput, BigQueryFilterInput
+```
+
+</Accordion>
+
+<Accordion title="Error: Type 'null' is not assignable to type 'string | undefined'">
+
+v2 no longer accepts `null` as a filter value. Instead of:
+
+```typescript
+userFilter({ name: null })
+```
+
+Either omit the field or use the `isNull` filter:
+
+```typescript
+// Option 1: Omit the field
+userFilter({})
+
+// Option 2: Use isNull filter
+const userFilter = inMemoryFilter<User>().def({
+    nameIsNull: { kind: "isNull", field: "name" },
+});
+
+userFilter({ nameIsNull: true })
+```
+
+</Accordion>
+
+<Accordion title="Error: Property 'PredicateCreator' does not exist">
+
+The `PredicateCreator` type was renamed to adapter-specific filter types. Replace:
+
+```typescript
+import type { PredicateCreator } from "@filter-def/in-memory";
+type MyFilter = PredicateCreator<User, any>;
+```
+
+With:
+
+```typescript
+import type { InMemoryFilter } from "@filter-def/in-memory";
+type MyFilter = InMemoryFilter<User, any>;
+```
+
+</Accordion>
+
+## Need Help?
+
+If you encounter issues during migration:
+
+1. Check the [GitHub issues](https://github.com/rmarganti/filter-def/issues) for similar problems
+2. Review the [API Reference](/api/core/types) for detailed type information
+3. Open a new issue with your migration question
+
+## Upgrade Checklist
+
+<Tip>
+Use this checklist to ensure a complete migration:
+</Tip>
+
+- [ ] Update all `@filter-def/*` packages to v2.x
+- [ ] Replace `InputForPredicateCreator` with adapter-specific input types
+- [ ] Replace `PredicateCreator` with adapter-specific filter types
+- [ ] Remove all `null` and `undefined` filter values
+- [ ] Update type aliases and function signatures
+- [ ] Run TypeScript type checker (`tsc --noEmit`)
+- [ ] Run test suite to verify behavior
+- [ ] Consider adopting new v2 features (nested fields, case-insensitive contains)
+- [ ] Update documentation and examples in your codebase

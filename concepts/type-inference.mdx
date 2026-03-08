@@ -1,0 +1,528 @@
+---
+title: Type Inference
+description: TypeScript type inference and utility types for filters
+---
+
+## Overview
+
+Filter-def provides complete TypeScript type safety through advanced type inference. Filter input types are automatically inferred from your filter definitions, ensuring type-safe filter usage throughout your application.
+
+## Filter Input Types
+
+Each adapter provides a utility type to extract the input type from a filter definition:
+
+<Tabs>
+  <Tab title="In-Memory">
+    ```typescript
+    import { inMemoryFilter } from '@filter-def/in-memory';
+    import type { InMemoryFilterInput } from '@filter-def/in-memory';
+
+    const userFilter = inMemoryFilter<User>().def({
+      name: { kind: 'eq' },
+      minAge: { kind: 'gte', field: 'age' },
+      emailContains: { kind: 'contains', field: 'email' },
+    });
+
+    type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+    // {
+    //   name?: string;
+    //   minAge?: number;
+    //   emailContains?: string;
+    // }
+    ```
+  </Tab>
+  <Tab title="Drizzle">
+    ```typescript
+    import { drizzleFilter } from '@filter-def/drizzle';
+    import type { DrizzleFilterInput } from '@filter-def/drizzle';
+
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      minAge: { kind: 'gte', field: 'age' },
+      emailContains: { kind: 'contains', field: 'email' },
+    });
+
+    type UserFilterInput = DrizzleFilterInput<typeof userFilter>;
+    // {
+    //   name?: string;
+    //   minAge?: number;
+    //   emailContains?: string;
+    // }
+    ```
+  </Tab>
+  <Tab title="BigQuery">
+    ```typescript
+    import { bigqueryFilter } from '@filter-def/bigquery';
+    import type { BigQueryFilterInput } from '@filter-def/bigquery';
+
+    const userFilter = bigqueryFilter<User>().def({
+      name: { kind: 'eq' },
+      minAge: { kind: 'gte', field: 'age' },
+      emailContains: { kind: 'contains', field: 'email' },
+    });
+
+    type UserFilterInput = BigQueryFilterInput<typeof userFilter>;
+    // {
+    //   name?: string;
+    //   minAge?: number;
+    //   emailContains?: string;
+    // }
+    ```
+  </Tab>
+</Tabs>
+
+## How Type Inference Works
+
+Filter-def infers input types based on:
+
+1. **Filter kind** - Determines the basic input type
+2. **Field type** - Resolves the entity field's TypeScript type
+3. **Field path** - Follows nested paths to get the correct type
+
+### Primitive Filter Type Mapping
+
+```typescript
+interface User {
+  name: string;
+  age: number;
+  roles: string[];
+  email: string;
+  createdAt: Date;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },                  // Input: string (from User.name)
+  minAge: { kind: 'gte', field: 'age' }, // Input: number (from User.age)
+  emailContains: { kind: 'contains', field: 'email' }, // Input: string (always string)
+  roles: { kind: 'inArray' },            // Input: string[] (array of User.roles type)
+  hasEmail: { kind: 'isNotNull', field: 'email' },     // Input: boolean
+});
+
+type Input = InMemoryFilterInput<typeof userFilter>;
+// {
+//   name?: string;
+//   minAge?: number;
+//   emailContains?: string;
+//   roles?: string[];
+//   hasEmail?: boolean;
+// }
+```
+
+### Filter Kind to Input Type Map
+
+| Filter Kind | Input Type | Notes |
+|-------------|------------|-------|
+| `eq` | Field type | Exact type of the field |
+| `neq` | Field type | Exact type of the field |
+| `contains` | `string` | Always string, regardless of field type |
+| `inArray` | `Field type[]` | Array of field's type |
+| `isNull` | `boolean` | Always boolean |
+| `isNotNull` | `boolean` | Always boolean |
+| `gt` | Field type | Exact type of the field |
+| `gte` | Field type | Exact type of the field |
+| `lt` | Field type | Exact type of the field |
+| `lte` | Field type | Exact type of the field |
+
+## Custom Filter Type Inference
+
+Custom filter input types are inferred from the function signature:
+
+<CodeGroup>
+```typescript In-Memory
+const userFilter = inMemoryFilter<User>().def({
+  // Custom filter with string input
+  hasRole: (user: User, role: string) => user.roles.includes(role),
+  
+  // Custom filter with number input
+  createdWithinDays: (user: User, days: number) => {
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    return user.createdAt >= cutoff;
+  },
+  
+  // Custom filter with complex input type
+  inDateRange: (user: User, range: { start: Date; end: Date }) => {
+    return user.createdAt >= range.start && user.createdAt <= range.end;
+  },
+});
+
+type Input = InMemoryFilterInput<typeof userFilter>;
+// {
+//   hasRole?: string;
+//   createdWithinDays?: number;
+//   inDateRange?: { start: Date; end: Date };
+// }
+```
+
+```typescript Drizzle
+const postFilter = drizzleFilter(postsTable).def({
+  // Custom filter: number input
+  ageDivisibleBy: (divisor: number) =>
+    sql`${usersTable.age} % ${divisor} = 0`,
+  
+  // Custom filter: date range input
+  publishedBetween: (range: { start: Date; end: Date }) =>
+    and(
+      gte(postsTable.publishedAt, range.start),
+      lte(postsTable.publishedAt, range.end)
+    ),
+  
+  // Custom filter: union type input
+  optionalStatus: (status: 'published' | 'draft' | 'all') =>
+    status === 'all'
+      ? undefined
+      : eq(postsTable.isPublished, status === 'published'),
+});
+
+type Input = DrizzleFilterInput<typeof postFilter>;
+// {
+//   ageDivisibleBy?: number;
+//   publishedBetween?: { start: Date; end: Date };
+//   optionalStatus?: 'published' | 'draft' | 'all';
+// }
+```
+</CodeGroup>
+
+## Boolean Filter Type Inference
+
+Boolean filters share the same input value across all conditions:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  searchTerm: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+type Input = InMemoryFilterInput<typeof userFilter>;
+// {
+//   searchTerm?: string;  // Single string input used for both conditions
+// }
+
+const results = users.filter(userFilter({ searchTerm: 'john' }));
+// Searches for "john" in both name AND email
+```
+
+## Nested Field Type Inference
+
+Nested field paths are resolved to their correct types:
+
+```typescript
+interface Employee {
+  name: {
+    first: string;
+    last: string;
+  };
+  address: {
+    city: string;
+    geo: {
+      lat: number;
+      lng: number;
+    };
+  };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+  firstName: { kind: 'eq', field: 'name.first' },
+  cityContains: { kind: 'contains', field: 'address.city' },
+  minLat: { kind: 'gte', field: 'address.geo.lat' },
+});
+
+type Input = InMemoryFilterInput<typeof employeeFilter>;
+// {
+//   firstName?: string;    // From name.first
+//   cityContains?: string; // From address.city (but contains always returns string)
+//   minLat?: number;       // From address.geo.lat
+// }
+```
+
+## All Fields Optional
+
+All filter input fields are optional by default:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  minAge: { kind: 'gte', field: 'age' },
+  emailContains: { kind: 'contains', field: 'email' },
+});
+
+type Input = InMemoryFilterInput<typeof userFilter>;
+// All fields optional:
+// {
+//   name?: string;
+//   minAge?: number;
+//   emailContains?: string;
+// }
+
+// All valid calls:
+userFilter();
+userFilter({});
+userFilter({ name: 'John' });
+userFilter({ name: 'John', minAge: 18 });
+userFilter({ name: 'John', minAge: 18, emailContains: '@example.com' });
+```
+
+## Using Inferred Types
+
+### In Function Parameters
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  minAge: { kind: 'gte', field: 'age' },
+  role: { kind: 'eq' },
+});
+
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+
+// Use in API handlers
+function getUsers(filters: UserFilterInput): User[] {
+  return users.filter(userFilter(filters));
+}
+
+// Use in React components
+function UserList({ filters }: { filters: UserFilterInput }) {
+  const filtered = users.filter(userFilter(filters));
+  return <>{/* ... */}</>;
+}
+
+// Use in service layer
+class UserService {
+  find(filters: UserFilterInput): User[] {
+    return users.filter(userFilter(filters));
+  }
+}
+```
+
+### In Type Guards
+
+```typescript
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+
+function isValidUserFilter(obj: unknown): obj is UserFilterInput {
+  if (typeof obj !== 'object' || obj === null) return false;
+  
+  const filter = obj as Record<string, unknown>;
+  
+  if (filter.name !== undefined && typeof filter.name !== 'string') {
+    return false;
+  }
+  
+  if (filter.minAge !== undefined && typeof filter.minAge !== 'number') {
+    return false;
+  }
+  
+  return true;
+}
+```
+
+### In Zod Schemas
+
+```typescript
+import { z } from 'zod';
+
+// Define filter
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  minAge: { kind: 'gte', field: 'age' },
+  role: { kind: 'inArray' },
+});
+
+// Create matching Zod schema for runtime validation
+const userFilterSchema = z.object({
+  name: z.string().optional(),
+  minAge: z.number().optional(),
+  role: z.array(z.string()).optional(),
+});
+
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+type ZodInput = z.infer<typeof userFilterSchema>;
+
+// Types are compatible:
+const input: UserFilterInput = userFilterSchema.parse(unknownInput);
+```
+
+## Core Type Utilities
+
+The `@filter-def/core` package exports several utility types:
+
+### FieldPath
+
+Generates all valid dot-separated paths for an entity:
+
+```typescript
+import type { FieldPath } from '@filter-def/core';
+
+interface User {
+  name: string;
+  profile: {
+    bio: string;
+    location: { city: string; country: string };
+  };
+}
+
+type Paths = FieldPath<User>;
+// "name" | "profile" | "profile.bio" | "profile.location" | 
+// "profile.location.city" | "profile.location.country"
+```
+
+### PathValue
+
+Resolves the type at a given path:
+
+```typescript
+import type { PathValue } from '@filter-def/core';
+
+type NameType = PathValue<User, 'name'>;
+// string
+
+type CityType = PathValue<User, 'profile.location.city'>;
+// string
+
+type ProfileType = PathValue<User, 'profile'>;
+// { bio: string; location: { city: string; country: string } }
+```
+
+### GetFieldForFilter
+
+Determines which entity field a filter targets:
+
+```typescript
+import type { GetFieldForFilter } from '@filter-def/core';
+
+type Field1 = GetFieldForFilter<'name', User, { kind: 'eq' }>;
+// "name" (inferred from key)
+
+type Field2 = GetFieldForFilter<'emailSearch', User, { kind: 'contains'; field: 'email' }>;
+// "email" (explicit field)
+```
+
+### Simplify
+
+Expands complex types for better IDE display:
+
+```typescript
+import type { Simplify } from '@filter-def/core';
+
+type Complex = { a: string } & { b: number } & { c: boolean };
+type Simple = Simplify<Complex>;
+// { a: string; b: number; c: boolean }
+```
+
+## Type Validation
+
+The `ValidateFilterDef` type ensures filter definitions are valid:
+
+```typescript
+import type { ValidateFilterDef } from '@filter-def/core';
+
+interface User {
+  name: string;
+  email: string;
+}
+
+// ✅ Valid: keys match fields or have explicit field property
+const valid: ValidateFilterDef<User, {
+  name: { kind: 'eq' };
+  emailContains: { kind: 'contains'; field: 'email' };
+}> = {
+  name: { kind: 'eq' },
+  emailContains: { kind: 'contains', field: 'email' },
+};
+
+// ❌ Compile error: 'firstName' doesn't match any User field
+const invalid: ValidateFilterDef<User, {
+  firstName: { kind: 'eq' };
+}> = {
+  firstName: { kind: 'eq' },
+};
+// Error: Filters must specify a valid `field` property or use a key
+// that matches a valid entity field
+```
+
+## Advanced: Conditional Types
+
+Filter-def uses conditional types extensively for type inference:
+
+```typescript
+// Simplified example of how input types are derived
+type FilterInputMap<K, Entity, FilterField> = {
+  eq: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+  neq: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+  contains: string;  // Always string
+  inArray: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>[];
+  isNull: boolean;  // Always boolean
+  isNotNull: boolean;  // Always boolean
+  gt: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+  gte: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+  lt: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+  lte: PathValue<Entity, GetFieldForFilter<K, Entity, FilterField>>;
+};
+
+type CoreFilterInput<K, Entity, FilterField> = 
+  FilterField extends { kind: infer Kind extends keyof FilterInputMap<K, Entity, FilterField> }
+    ? FilterInputMap<K, Entity, FilterField>[Kind]
+    : never;
+```
+
+## Best Practices
+
+### Export Filter Types
+
+Export inferred types for reuse across your codebase:
+
+```typescript
+// filters/user.ts
+export const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  minAge: { kind: 'gte', field: 'age' },
+});
+
+export type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+```
+
+### Use Type Aliases for Complex Filters
+
+```typescript
+const complexFilter = inMemoryFilter<Product>().def({
+  name: { kind: 'eq' },
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  categorySearch: {
+    kind: 'or',
+    conditions: [
+      { kind: 'eq', field: 'category' },
+      { kind: 'eq', field: 'subcategory' },
+    ],
+  },
+});
+
+// Create a descriptive type alias
+export type ProductSearchInput = InMemoryFilterInput<typeof complexFilter>;
+```
+
+### Document Custom Input Types
+
+```typescript
+const eventFilter = inMemoryFilter<Event>().def({
+  /**
+   * Filter events by date range
+   * @param start - The start date (inclusive)
+   * @param end - The end date (inclusive)
+   */
+  dateRange: (
+    event: Event,
+    range: { start: Date; end: Date }
+  ) => event.date >= range.start && event.date <= range.end,
+});
+```
+
+## Next Steps
+
+- [Filter Definitions](/concepts/filter-definitions) - Learn how to define filters
+- [Custom Filters](/concepts/custom-filters) - Create custom filter functions
+- [Nested Fields](/concepts/nested-fields) - Work with nested object properties

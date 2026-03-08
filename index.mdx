@@ -1,97 +1,102 @@
 ---
-title: "Introduction"
-description: "Welcome to the new home for your documentation"
+title: "Type-Safe Data Filters for TypeScript"
+description: "Define filters once, use them across different data backends with full type inference"
 ---
 
-## Setting up
+<div style={{background: 'linear-gradient(135deg, #020627 0%, #11161e 100%)', padding: '60px 40px', borderRadius: '12px', marginBottom: '40px'}}>
+  <h1 style={{fontSize: '48px', fontWeight: '700', color: '#ffffff', marginBottom: '20px', fontFamily: 'Inter'}}>
+    filter-def
+  </h1>
+  <p style={{fontSize: '20px', color: '#cfd0d2', marginBottom: '30px', maxWidth: '800px'}}>
+    Easy, type-safe data filters in TypeScript. Define your filters once and get full type inference for filter inputs and results across in-memory arrays, Drizzle ORM, and BigQuery.
+  </p>
+  <div style={{display: 'flex', gap: '16px', flexWrap: 'wrap'}}>
+    <a href="/quickstart" style={{background: '#238636', color: '#ffffff', padding: '12px 24px', borderRadius: '6px', textDecoration: 'none', fontWeight: '600', display: 'inline-block'}}>
+      Get Started
+    </a>
+    <a href="https://github.com/rmarganti/filter-def" style={{background: 'transparent', color: '#ffffff', padding: '12px 24px', borderRadius: '6px', textDecoration: 'none', fontWeight: '600', border: '2px solid rgba(96,99,146,1)', display: 'inline-block'}}>
+      View on GitHub
+    </a>
+  </div>
+</div>
 
-Get your documentation site up and running in minutes.
+## Key Features
 
-<Card
-  title="Start here"
-  icon="rocket"
-  href="/quickstart"
-  horizontal
->
-  Follow our three step quickstart guide.
-</Card>
-
-## Make it yours
-
-Design a docs site that looks great and empowers your users.
-
-<Columns cols={2}>
-  <Card
-    title="Edit locally"
-    icon="pen-to-square"
-    href="/development"
-  >
-    Edit your docs locally and preview them in real time.
+<CardGroup cols={2}>
+  <Card title="Type-Safe" icon="shield-check" iconType="solid">
+    Full TypeScript inference for filter inputs and entity fields. Catch errors at compile time, not runtime.
   </Card>
-  <Card
-    title="Customize your site"
-    icon="palette"
-    href="/essentials/settings"
-  >
-    Customize the design and colors of your site to match your brand.
+  <Card title="Multi-Backend" icon="database" iconType="solid">
+    Use the same filter patterns for in-memory arrays, Drizzle ORM, or BigQuery with zero lock-in.
   </Card>
-    <Card
-    title="Set up navigation"
-    icon="map"
-    href="/essentials/navigation"
-  >
-    Organize your docs to help users find what they need and succeed with your product.
+  <Card title="Composable" icon="puzzle-piece" iconType="solid">
+    Combine filters with AND/OR boolean logic to build complex queries from simple building blocks.
   </Card>
-  <Card
-    title="API documentation"
-    icon="terminal"
-    href="/api-reference/introduction"
-  >
-    Auto-generate API documentation from OpenAPI specifications.
+  <Card title="Extensible" icon="code" iconType="solid">
+    Define custom filter functions with adapter-specific implementations for business logic.
   </Card>
-</Columns>
+</CardGroup>
 
-## Create beautiful pages
+## Quick Example
 
-Everything you need to create world-class documentation.
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
 
-<Columns cols={2}>
-  <Card
-    title="Write with MDX"
-    icon="pen-fancy"
-    href="/essentials/markdown"
-  >
-    Use MDX to style your docs pages.
-  </Card>
-  <Card
-    title="Code samples"
-    icon="code"
-    href="/essentials/code"
-  >
-    Add sample code to demonstrate how to use your product.
-  </Card>
-  <Card
-    title="Images"
-    icon="image"
-    href="/essentials/images"
-  >
-    Display images and other media.
-  </Card>
-  <Card
-    title="Reusable snippets"
-    icon="recycle"
-    href="/essentials/reusable-snippets"
-  >
-    Write once and reuse across your docs.
-  </Card>
-</Columns>
+interface User {
+    name: string;
+    email: string;
+    age: number;
+}
 
-## Need inspiration?
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+});
 
-<Card
-  title="See complete examples"
-  icon="stars"
-  href="https://mintlify.com/customers"
->
-  Browse our showcase of exceptional documentation sites.
-</Card>
+const users: User[] = [
+    { name: "Alice", email: "alice@example.com", age: 30 },
+    { name: "Bob", email: "bob@example.com", age: 25 },
+];
+
+const results = users.filter(
+    userFilter({
+        name: "Alice",
+        minAge: 18,
+    })
+);
+// Results: [{ name: "Alice", email: "alice@example.com", age: 30 }]
+```
+
+## Get Started
+
+<CardGroup cols={2}>
+  <Card title="Installation" icon="download" href="/installation">
+    Install filter-def packages for your backend
+  </Card>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get up and running in 5 minutes
+  </Card>
+  <Card title="Core Concepts" icon="book" href="/concepts/filter-definitions">
+    Learn about filter definitions and types
+  </Card>
+  <Card title="API Reference" icon="code" href="/api/core/types">
+    Explore the complete API documentation
+  </Card>
+</CardGroup>
+
+## Adapters
+
+Choose the adapter that fits your data backend:
+
+<CardGroup cols={3}>
+  <Card title="In-Memory" icon="memory" href="/adapters/in-memory">
+    Filter JavaScript arrays with native methods
+  </Card>
+  <Card title="Drizzle ORM" icon="database" href="/adapters/drizzle">
+    Generate SQL WHERE clauses for Drizzle
+  </Card>
+  <Card title="BigQuery" icon="cloud" href="/adapters/bigquery">
+    Create parameterized SQL for BigQuery
+  </Card>
+</CardGroup>

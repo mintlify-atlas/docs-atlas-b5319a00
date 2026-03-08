@@ -1,80 +1,581 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Build your first filter-def filter in 5 minutes
 ---
 
-## Get started in three steps
+This guide walks you through creating your first type-safe filter with filter-def. We'll start with in-memory filtering and show examples for all adapters.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+- Node.js 18+
+- TypeScript 5.0+
+- Basic TypeScript knowledge
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+## In-Memory Filtering
 
-### Step 2: Deploy your changes
+Let's build a user filter for an in-memory array.
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+<Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<Step title="Install the package">
+  Install `@filter-def/in-memory`:
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+  <CodeGroup>
+  ```bash npm
+  npm install @filter-def/in-memory
+  ```
 
-### Step 3: Go live
+  ```bash yarn
+  yarn add @filter-def/in-memory
+  ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+  ```bash pnpm
+  pnpm add @filter-def/in-memory
+  ```
+  </CodeGroup>
+</Step>
 
-## Next steps
+<Step title="Define your entity type">
+  Create a TypeScript interface for your data:
 
-Now that you have your docs running, explore these key features:
+  ```typescript
+  interface User {
+      name: string;
+      email: string;
+      age: number;
+      isActive: boolean;
+  }
+  ```
+</Step>
+
+<Step title="Create a filter definition">
+  Import `inMemoryFilter` and define your filter schema:
+
+  ```typescript
+  import { inMemoryFilter } from "@filter-def/in-memory";
+
+  const userFilter = inMemoryFilter<User>().def({
+      name: { kind: "eq" },
+      emailContains: { kind: "contains", field: "email" },
+      minAge: { kind: "gte", field: "age" },
+      isActive: { kind: "eq" },
+  });
+  ```
+
+  <Tip>
+  When the filter name matches the field name (like `name` and `isActive`), the `field` property is automatically inferred!
+  </Tip>
+</Step>
+
+<Step title="Create test data">
+  Set up an array of users:
+
+  ```typescript
+  const users: User[] = [
+      { name: "John Doe", email: "john@example.com", age: 30, isActive: true },
+      { name: "Jane Doe", email: "jane@example.com", age: 25, isActive: true },
+      { name: "Bob Smith", email: "bob@smith.org", age: 40, isActive: false },
+      { name: "Alice Johnson", email: "alice@example.com", age: 28, isActive: true },
+  ];
+  ```
+</Step>
+
+<Step title="Apply the filter">
+  Use the filter with native array methods:
+
+  ```typescript
+  // Find all active users with @example.com emails
+  const results = users.filter(
+      userFilter({
+          emailContains: "@example.com",
+          isActive: true,
+      })
+  );
+
+  console.log(results);
+  // Output: [
+  //   { name: "John Doe", email: "john@example.com", age: 30, isActive: true },
+  //   { name: "Jane Doe", email: "jane@example.com", age: 25, isActive: true },
+  //   { name: "Alice Johnson", email: "alice@example.com", age: 28, isActive: true }
+  // ]
+  ```
+</Step>
+
+<Step title="Try different filters">
+  All filter properties are optional. Try different combinations:
+
+  ```typescript
+  // Find users 30 or older
+  const older = users.filter(
+      userFilter({ minAge: 30 })
+  );
+
+  // Find a specific user
+  const john = users.find(
+      userFilter({ name: "John Doe" })
+  );
+
+  // Check if any user matches
+  const hasInactive = users.some(
+      userFilter({ isActive: false })
+  );
+
+  // Combine multiple conditions
+  const specific = users.filter(
+      userFilter({
+          emailContains: "example",
+          minAge: 28,
+          isActive: true,
+      })
+  );
+  ```
+</Step>
+
+</Steps>
+
+## Drizzle ORM (SQL Databases)
+
+Use the same filter patterns with Drizzle ORM for SQL databases.
+
+<Steps>
+
+<Step title="Install dependencies">
+  Install the Drizzle adapter and Drizzle ORM:
+
+  <CodeGroup>
+  ```bash npm
+  npm install @filter-def/drizzle drizzle-orm
+  ```
+
+  ```bash yarn
+  yarn add @filter-def/drizzle drizzle-orm
+  ```
+
+  ```bash pnpm
+  pnpm add @filter-def/drizzle drizzle-orm
+  ```
+  </CodeGroup>
+
+  <Note>
+  You'll also need a database driver (e.g., `pg` for PostgreSQL, `better-sqlite3` for SQLite).
+  </Note>
+</Step>
+
+<Step title="Define your database schema">
+  Create a Drizzle table schema:
+
+  ```typescript
+  import { pgTable, text, integer, boolean } from "drizzle-orm/pg-core";
+
+  const usersTable = pgTable("users", {
+      id: integer("id").primaryKey(),
+      name: text("name").notNull(),
+      email: text("email").notNull(),
+      age: integer("age").notNull(),
+      isActive: boolean("is_active").notNull().default(true),
+  });
+  ```
+</Step>
+
+<Step title="Create a filter definition">
+  Import `drizzleFilter` and pass your table schema:
+
+  ```typescript
+  import { drizzleFilter } from "@filter-def/drizzle";
+
+  const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: "eq" },
+      emailContains: { kind: "contains", field: "email" },
+      minAge: { kind: "gte", field: "age" },
+      isActive: { kind: "eq" },
+  });
+  ```
+</Step>
+
+<Step title="Query the database">
+  Use the filter to generate SQL WHERE clauses:
+
+  ```typescript
+  import { drizzle } from "drizzle-orm/node-postgres";
+  import { Pool } from "pg";
+
+  const pool = new Pool({
+      connectionString: process.env.DATABASE_URL,
+  });
+  const db = drizzle(pool);
+
+  // Generate WHERE clause
+  const where = userFilter({
+      emailContains: "@example.com",
+      isActive: true,
+  });
+
+  // Execute query
+  const results = await db
+      .select()
+      .from(usersTable)
+      .where(where);
+
+  console.log(results);
+  ```
+</Step>
+
+<Step title="Try complex queries">
+  Combine filters with Drizzle's query builder:
+
+  ```typescript
+  import { desc } from "drizzle-orm";
+
+  // Filter and sort
+  const sortedUsers = await db
+      .select()
+      .from(usersTable)
+      .where(userFilter({ minAge: 25 }))
+      .orderBy(desc(usersTable.age))
+      .limit(10);
+
+  // Count matching records
+  const count = await db
+      .select({ count: sql<number>`count(*)` })
+      .from(usersTable)
+      .where(userFilter({ isActive: true }));
+  ```
+</Step>
+
+</Steps>
+
+## BigQuery
+
+Generate parameterized SQL for Google BigQuery.
+
+<Steps>
+
+<Step title="Install dependencies">
+  Install the BigQuery adapter and Google Cloud SDK:
+
+  <CodeGroup>
+  ```bash npm
+  npm install @filter-def/bigquery @google-cloud/bigquery
+  ```
+
+  ```bash yarn
+  yarn add @filter-def/bigquery @google-cloud/bigquery
+  ```
+
+  ```bash pnpm
+  pnpm add @filter-def/bigquery @google-cloud/bigquery
+  ```
+  </CodeGroup>
+</Step>
+
+<Step title="Define your entity type">
+  Create a TypeScript interface matching your BigQuery table:
+
+  ```typescript
+  interface User {
+      name: string;
+      email: string;
+      age: number;
+      isActive: boolean;
+  }
+  ```
+</Step>
+
+<Step title="Create a filter definition">
+  Import `bigqueryFilter` and define your filter schema:
+
+  ```typescript
+  import { bigqueryFilter } from "@filter-def/bigquery";
+
+  const userFilter = bigqueryFilter<User>().def({
+      name: { kind: "eq" },
+      emailContains: { kind: "contains", field: "email" },
+      minAge: { kind: "gte", field: "age" },
+      isActive: { kind: "eq" },
+  });
+  ```
+</Step>
+
+<Step title="Query BigQuery">
+  Generate parameterized SQL and execute the query:
+
+  ```typescript
+  import { BigQuery } from "@google-cloud/bigquery";
+
+  const bigquery = new BigQuery({
+      projectId: process.env.GCP_PROJECT_ID,
+  });
+
+  // Generate parameterized SQL
+  const where = userFilter({
+      emailContains: "@example.com",
+      isActive: true,
+  });
+
+  // Execute query
+  const [rows] = await bigquery.query({
+      query: `
+          SELECT name, email, age
+          FROM \`myproject.dataset.users\`
+          WHERE ${where.sql}
+      `,
+      params: where.params,
+  });
+
+  console.log(rows);
+  ```
+
+  <Tip>
+  The filter returns both `sql` (the WHERE clause) and `params` (the query parameters) to prevent SQL injection.
+  </Tip>
+</Step>
+
+<Step title="Use with complex queries">
+  Combine filters with aggregations and joins:
+
+  ```typescript
+  const where = userFilter({ minAge: 25, isActive: true });
+
+  const [rows] = await bigquery.query({
+      query: `
+          SELECT
+              age,
+              COUNT(*) as user_count,
+              AVG(engagement_score) as avg_engagement
+          FROM \`myproject.dataset.users\`
+          WHERE ${where.sql}
+          GROUP BY age
+          ORDER BY user_count DESC
+      `,
+      params: where.params,
+  });
+  ```
+</Step>
+
+</Steps>
+
+## Advanced Examples
+
+### Combining Multiple Filters with OR Logic
+
+Search across multiple fields:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    searchTerm: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "email" },
+        ],
+    },
+});
+
+// Matches users with "john" in name OR email
+const results = users.filter(
+    userFilter({ searchTerm: "john" })
+);
+```
+
+### Age Range with AND Logic
+
+Filter values between a range:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    ageRange: {
+        kind: "and",
+        conditions: [
+            { kind: "gte", field: "age" },
+            { kind: "lte", field: "age" },
+        ],
+    },
+});
+
+// Matches users aged 25-35
+const results = users.filter(
+    userFilter({ ageRange: [25, 35] })
+);
+```
+
+### Custom Filter Logic
+
+Implement complex business rules:
+
+```typescript
+interface BlogPost {
+    title: string;
+    tags: string[];
+    publishedAt: Date;
+    viewCount: number;
+    likeCount: number;
+}
+
+const postFilter = inMemoryFilter<BlogPost>().def({
+    // Check if post has a specific tag
+    hasTag: (post, tag: string) => post.tags.includes(tag),
+
+    // Check if published within X days
+    publishedWithinDays: (post, days: number) => {
+        const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+        return post.publishedAt >= cutoff;
+    },
+
+    // Calculate engagement rate
+    minEngagementRate: (post, minRate: number) => {
+        return post.likeCount / post.viewCount >= minRate;
+    },
+});
+
+// Find trending posts
+const trending = posts.filter(
+    postFilter({
+        publishedWithinDays: 7,
+        minEngagementRate: 0.1,
+        hasTag: "featured",
+    })
+);
+```
+
+### Nested Field Access
+
+Filter on deeply nested properties:
+
+```typescript
+interface Employee {
+    name: { first: string; last: string };
+    address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+    firstName: { kind: "eq", field: "name.first" },
+    city: { kind: "contains", field: "address.city" },
+    minLat: { kind: "gte", field: "address.geo.lat" },
+});
+
+const employees: Employee[] = [
+    {
+        name: { first: "John", last: "Doe" },
+        address: { city: "San Francisco", geo: { lat: 37.7749, lng: -122.4194 } },
+    },
+    {
+        name: { first: "Jane", last: "Smith" },
+        address: { city: "New York", geo: { lat: 40.7128, lng: -74.0060 } },
+    },
+];
+
+const results = employees.filter(
+    employeeFilter({
+        firstName: "John",
+        city: "Francisco",
+    })
+);
+```
+
+### Type-Safe Filter Inputs
+
+Extract the input type for type-safe function parameters:
+
+```typescript
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+    isActive: { kind: "eq" },
+});
+
+// Extract the filter input type
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+// Type: { name?: string; minAge?: number; isActive?: boolean }
+
+// Use in function signatures
+function filterUsers(users: User[], filters: UserFilterInput): User[] {
+    return users.filter(userFilter(filters));
+}
+
+// TypeScript validates the input
+const results = filterUsers(users, {
+    name: "John",      // ✓ valid
+    minAge: 25,        // ✓ valid
+    // minAge: "25",   // ✗ Type error: string not assignable to number
+});
+```
+
+## Common Patterns
+
+### API Query Parameters
+
+Build REST APIs with filter support:
+
+```typescript
+import express from "express";
+import { drizzleFilter } from "@filter-def/drizzle";
+
+const app = express();
+
+const userFilter = drizzleFilter(usersTable).def({
+    name: { kind: "contains" },
+    minAge: { kind: "gte", field: "age" },
+    isActive: { kind: "eq" },
+});
+
+app.get("/api/users", async (req, res) => {
+    const { name, minAge, isActive } = req.query;
+
+    const where = userFilter({
+        name: name as string | undefined,
+        minAge: minAge ? Number(minAge) : undefined,
+        isActive: isActive === "true" ? true : undefined,
+    });
+
+    const users = await db.select().from(usersTable).where(where);
+    res.json(users);
+});
+```
+
+### Reusable Filter Helpers
+
+Create wrapper functions for cleaner code:
+
+```typescript
+import { inMemoryFilter, makeFilterHelpers } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    isActive: { kind: "eq" },
+});
+
+const {
+    filter: filterUsers,
+    find: findUser,
+    some: someUsers,
+} = makeFilterHelpers(userFilter);
+
+// Cleaner API
+const activeUsers = filterUsers(users, { isActive: true });
+const john = findUser(users, { name: "John" });
+const hasActive = someUsers(users, { isActive: true });
+```
+
+## Next Steps
 
 <CardGroup cols={2}>
 
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
+<Card title="Filter Types Reference" icon="list" href="/concepts/filter-types">
+  Explore all available filter types and operators
 </Card>
 
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
+<Card title="In-Memory Adapter" icon="memory" href="/adapters/in-memory">
+  Deep dive into in-memory filtering
 </Card>
 
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
+<Card title="Drizzle Adapter" icon="database" href="/adapters/drizzle">
+  Learn about SQL filtering with Drizzle
 </Card>
 
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
+<Card title="BigQuery Adapter" icon="cloud" href="/adapters/bigquery">
+  Explore BigQuery integration
 </Card>
 
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

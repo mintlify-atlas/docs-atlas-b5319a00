@@ -1,0 +1,450 @@
+---
+title: Core Types
+description: All core types exported from @filter-def/core
+---
+
+The `@filter-def/core` package provides type-only exports that define the foundation for all filter-def adapters.
+
+## Core Filter Types
+
+### CoreFilter
+
+```typescript
+type CoreFilter<Entity> = PrimitiveFilter<Entity> | BooleanFilter<Entity>;
+```
+
+The union of all filter types supported by all adapters. This excludes custom filters, which are implementation-specific.
+
+<ParamField path="Entity" type="type parameter">
+  The entity type being filtered
+</ParamField>
+
+### CoreFilterKind
+
+```typescript
+type CoreFilterKind = PrimitiveFilterKind | BooleanFilterKind;
+```
+
+Union type of all filter kind identifiers.
+
+### CoreFilterField
+
+```typescript
+type CoreFilterField<Entity> = PrimitiveFilter<Entity> | BooleanFilter<Entity>;
+```
+
+A universal filter field that works with all implementations (in-memory, drizzle, bigquery).
+
+### CoreFilterDef
+
+```typescript
+type CoreFilterDef<Entity> = Record<string, CoreFilterField<Entity>>;
+```
+
+Filter definition type for core filter types. Only supports filter fields that are universal and not implementation-specific.
+
+### CoreFilterInput
+
+```typescript
+type CoreFilterInput<K extends PropertyKey, Entity, TFilterField extends CoreFilter<Entity>> = ...
+```
+
+Helper type to extract the expected input type for a filter field. Automatically infers the correct input type based on the filter kind and entity field type.
+
+<ResponseField name="Usage Example">
+```typescript
+interface User {
+  id: string;
+  name: string;
+  age: number;
+}
+
+type NameEqFilter = CoreFilterInput<'name', User, EqFilter<User>>;
+// type NameEqFilter = string
+
+type AgeGtFilter = CoreFilterInput<'age', User, GTFilter<User>>;
+// type AgeGtFilter = number
+```
+</ResponseField>
+
+## Primitive Filter Types
+
+### PrimitiveFilter
+
+```typescript
+type PrimitiveFilter<Entity> =
+  | EqFilter<Entity>
+  | NeqFilter<Entity>
+  | ContainsFilter<Entity>
+  | InArrayFilter<Entity>
+  | IsNullFilter<Entity>
+  | IsNotNullFilter<Entity>
+  | GTFilter<Entity>
+  | GTEFilter<Entity>
+  | LTFilter<Entity>
+  | LTEFilter<Entity>;
+```
+
+All core primitive filters that operate on individual fields.
+
+### PrimitiveFilterKind
+
+```typescript
+type PrimitiveFilterKind = "eq" | "neq" | "contains" | "inArray" | "isNull" | "isNotNull" | "gt" | "gte" | "lt" | "lte";
+```
+
+Union of all primitive filter kind identifiers.
+
+### CommonFilterOptions
+
+```typescript
+interface CommonFilterOptions<Entity> {
+  field?: FieldPath<Entity>;
+}
+```
+
+Base options shared by all primitive filters.
+
+<ParamField path="field" type="FieldPath<Entity>" optional>
+  Explicit field path to filter on. If omitted, the filter key is used as the field name.
+</ParamField>
+
+### EqFilter
+
+```typescript
+interface EqFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "eq";
+}
+```
+
+An equality filter that passes only if the value is referentially equal to the filter value.
+
+<ResponseField name="Example">
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+});
+
+const where = userFilter({ name: 'John' });
+const users = allUsers.filter(where);
+```
+</ResponseField>
+
+### NeqFilter
+
+```typescript
+interface NeqFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "neq";
+}
+```
+
+A not-equals filter that passes only if the value is not referentially equal to the filter value.
+
+### ContainsFilter
+
+```typescript
+interface ContainsFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "contains";
+  caseInsensitive?: boolean;
+}
+```
+
+A substring filter that passes when the string representation of the value contains the string representation of the filter value.
+
+<ParamField path="caseInsensitive" type="boolean" optional>
+  When `true`, performs case-insensitive comparison. Default: `false`
+</ParamField>
+
+<ResponseField name="Example">
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  nameContains: { kind: 'contains', field: 'name' },
+  emailContains: { kind: 'contains', field: 'email', caseInsensitive: true },
+});
+
+const where = userFilter({ nameContains: 'doe' });
+```
+</ResponseField>
+
+### InArrayFilter
+
+```typescript
+interface InArrayFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "inArray";
+}
+```
+
+An array membership filter that passes when the value is contained within the filter value array.
+
+<ResponseField name="Example">
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  status: { kind: 'inArray' },
+});
+
+const where = userFilter({ status: ['active', 'pending'] });
+```
+</ResponseField>
+
+### IsNullFilter
+
+```typescript
+interface IsNullFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "isNull";
+}
+```
+
+A null check filter that passes when the value is `null` or `undefined`.
+
+<ResponseField name="Usage">
+Input: `true` → passes if value is null/undefined  
+Input: `false` → passes if value is not null/undefined
+</ResponseField>
+
+### IsNotNullFilter
+
+```typescript
+interface IsNotNullFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "isNotNull";
+}
+```
+
+A not-null check filter that passes when the value is not `null` and not `undefined`.
+
+<ResponseField name="Usage">
+Input: `true` → passes if value is not null/undefined  
+Input: `false` → passes if value is null/undefined
+</ResponseField>
+
+### GTFilter
+
+```typescript
+interface GTFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "gt";
+}
+```
+
+A greater-than filter. Works with any comparable data type (numbers, strings, dates).
+
+### GTEFilter
+
+```typescript
+interface GTEFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "gte";
+}
+```
+
+A greater-than-or-equal filter. Works with any comparable data type (numbers, strings, dates).
+
+### LTFilter
+
+```typescript
+interface LTFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "lt";
+}
+```
+
+A less-than filter. Works with any comparable data type (numbers, strings, dates).
+
+### LTEFilter
+
+```typescript
+interface LTEFilter<Entity> extends CommonFilterOptions<Entity> {
+  kind: "lte";
+}
+```
+
+A less-than-or-equal filter. Works with any comparable data type (numbers, strings, dates).
+
+## Boolean Filter Types
+
+### BooleanFilter
+
+```typescript
+type BooleanFilter<Entity> = AndFilter<Entity> | OrFilter<Entity>;
+```
+
+All core boolean filters that combine multiple conditions.
+
+### BooleanFilterKind
+
+```typescript
+type BooleanFilterKind = "and" | "or";
+```
+
+Union of all boolean filter kind identifiers.
+
+### AndFilter
+
+```typescript
+interface AndFilter<Entity> {
+  kind: "and";
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+```
+
+A boolean filter that requires ALL of its conditions to be met.
+
+<ParamField path="conditions" type="PrimitiveFilter<Entity>[]" required>
+  Non-empty array of primitive filters. All conditions must have explicit `field` properties.
+</ParamField>
+
+<ResponseField name="Example">
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  seniorEngineer: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'age' },
+      { kind: 'eq', field: 'role' },
+    ],
+  },
+});
+
+const where = userFilter({ seniorEngineer: 30 });
+// Matches users where age >= 30 AND role === 30
+```
+</ResponseField>
+
+### OrFilter
+
+```typescript
+interface OrFilter<Entity> {
+  kind: "or";
+  conditions: [PrimitiveFilter<Entity>, ...PrimitiveFilter<Entity>[]];
+}
+```
+
+A boolean filter that requires AT LEAST ONE of its conditions to be met.
+
+<ParamField path="conditions" type="PrimitiveFilter<Entity>[]" required>
+  Non-empty array of primitive filters. All conditions must have explicit `field` properties.
+</ParamField>
+
+<ResponseField name="Example">
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  searchAnywhere: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'email' },
+    ],
+  },
+});
+
+const where = userFilter({ searchAnywhere: 'john' });
+// Matches users where name contains 'john' OR email contains 'john'
+```
+</ResponseField>
+
+## Utility Types
+
+### FieldPath
+
+```typescript
+type FieldPath<T, Depth extends number = 4> = ...
+```
+
+Produces a union of all dot-separated paths into type `T`. Depth is capped at 4 to avoid TypeScript instantiation-depth errors.
+
+<ResponseField name="Example">
+```typescript
+interface User {
+  name: {
+    first: string;
+    last: string;
+  };
+  email: string;
+}
+
+type Paths = FieldPath<User>;
+// type Paths = "name" | "name.first" | "name.last" | "email"
+```
+</ResponseField>
+
+### PathValue
+
+```typescript
+type PathValue<T, P extends string> = ...
+```
+
+Resolves the value type at a dot-separated path.
+
+<ResponseField name="Example">
+```typescript
+interface User {
+  name: {
+    first: string;
+    last: string;
+  };
+}
+
+type FirstName = PathValue<User, "name.first">;
+// type FirstName = string
+```
+</ResponseField>
+
+### GetFieldForFilter
+
+```typescript
+type GetFieldForFilter<K extends PropertyKey, Entity, TFilterField> = ...
+```
+
+Helper type to get the field for a filter, either from explicit field property or inferred from the key. Useful for adapter authors.
+
+### ValidateFilterDef
+
+```typescript
+type ValidateFilterDef<Entity, TFilterDef> = ...
+```
+
+Validates that filter keys without explicit field properties match entity fields. Boolean filters require all conditions to have explicit field properties.
+
+<Expandable title="Validation Rules">
+<ResponseField name="Valid Patterns">
+- Filter keys that match entity fields
+- Filters with explicit `field` property (any key name allowed)
+- Boolean filters with all conditions specifying `field`
+- Custom filter functions (always valid)
+</ResponseField>
+
+<ResponseField name="Invalid Patterns">
+- Filter keys that don't match entity fields and lack `field` property
+- Explicit `field` values that don't match entity fields
+- Boolean filter conditions without explicit `field` property
+</ResponseField>
+</Expandable>
+
+### Simplify
+
+```typescript
+type Simplify<T> = { [K in keyof T]: T[K] } & {};
+```
+
+Forces TypeScript to evaluate and display a type in simplified form. Improves developer experience in IDE tooltips.
+
+### TypeError
+
+```typescript
+type TypeError<T extends string> = `⚠️ TypeError: ${T}`;
+```
+
+Utility type to expose meaningful error messages to consumers.
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Filter Kinds" icon="filter" href="/api/core/filter-kinds">
+    Filter kind constants and usage patterns
+  </Card>
+  <Card title="In-Memory Filter" icon="memory" href="/api/in-memory/filter">
+    Use these types with the in-memory adapter
+  </Card>
+  <Card title="Drizzle Filter" icon="database" href="/api/drizzle/filter">
+    Use these types with the Drizzle adapter
+  </Card>
+  <Card title="BigQuery Filter" icon="chart-mixed" href="/api/bigquery/filter">
+    Use these types with the BigQuery adapter
+  </Card>
+</CardGroup>

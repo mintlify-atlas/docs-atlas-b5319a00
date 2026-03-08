@@ -1,0 +1,647 @@
+---
+title: Building Custom Adapters
+description: Learn how to create custom filter-def adapters for new backends
+---
+
+## Overview
+
+filter-def's architecture allows you to create custom adapters for any data backend. This guide will walk you through building an adapter from scratch, using patterns from the official adapters.
+
+<Note>
+Before building a custom adapter, check if an [existing adapter](/quickstart#installation) meets your needs. The ecosystem includes adapters for in-memory arrays, Drizzle ORM, and BigQuery.
+</Note>
+
+## Understanding the Architecture
+
+filter-def uses a two-phase approach:
+
+<Steps>
+
+<Step title="Definition Phase">
+Users define filters using a declarative API:
+
+```typescript
+const userFilter = myAdapter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+```
+
+</Step>
+
+<Step title="Execution Phase">
+Users call the filter with runtime values:
+
+```typescript
+const result = userFilter({ name: "John", minAge: 18 });
+// Returns backend-specific output (predicate, SQL, etc.)
+```
+
+</Step>
+
+</Steps>
+
+### Core Components
+
+Every adapter needs:
+
+1. **Entry Point**: A function that accepts entity type and returns a `def` method
+2. **Filter Definition Types**: TypeScript types describing allowed filter configurations
+3. **Custom Filter Types**: Backend-specific filter functions
+4. **Input Types**: TypeScript types for runtime filter values
+5. **Compilation Logic**: Code that transforms filter definitions into backend operations
+
+## Building an Adapter
+
+Let's build a simple MongoDB adapter as an example.
+
+### Step 1: Set Up Core Types
+
+First, import core types from `@filter-def/core`:
+
+```typescript mongodb-filter.ts
+import type {
+    CoreFilter,
+    CoreFilterField,
+    CoreFilterInput,
+    PrimitiveFilter,
+    BooleanFilter,
+    Simplify,
+    ValidateFilterDef,
+} from "@filter-def/core";
+```
+
+### Step 2: Define Custom Filter Types
+
+Define what a custom filter looks like for your backend:
+
+```typescript mongodb-filter.ts
+/**
+ * Custom filter for MongoDB that returns a query object.
+ */
+export type MongoCustomFilter<Input> = (
+    input: Input
+) => Record<string, any>;
+```
+
+<Tip>
+Custom filters let users write backend-specific logic when core filters aren't sufficient.
+</Tip>
+
+### Step 3: Define Filter Field and Definition Types
+
+```typescript mongodb-filter.ts
+/**
+ * A single filter field can be a core filter or custom filter.
+ */
+type MongoFilterField<Entity> =
+    | CoreFilterField<Entity>
+    | MongoCustomFilter<any>;
+
+/**
+ * A filter definition is a record of filter fields.
+ */
+export type MongoFilterDef<Entity> = Record<
+    string,
+    MongoFilterField<Entity>
+>;
+```
+
+### Step 4: Define Input Type Extraction
+
+Create types that extract the expected input for each filter:
+
+```typescript mongodb-filter.ts
+/**
+ * Extract input type for a filter definition.
+ */
+export type MongoFilterDefInput<
+    Entity,
+    TFilterDef extends MongoFilterDef<Entity>,
+> = {
+    [K in keyof TFilterDef]?: TFilterDef[K] extends MongoFilterField<Entity>
+        ? MongoFilterFieldInput<K, Entity, TFilterDef[K]>
+        : never;
+};
+
+/**
+ * Extract input type for a single filter field.
+ */
+type MongoFilterFieldInput<K extends PropertyKey, Entity, TFilterField> =
+    TFilterField extends MongoCustomFilter<infer Input>
+        ? Input  // Custom filter: use its input type
+        : TFilterField extends CoreFilter<Entity>
+          ? CoreFilterInput<K, Entity, TFilterField>  // Core filter: use CoreFilterInput
+          : never;
+```
+
+### Step 5: Define Output Types
+
+```typescript mongodb-filter.ts
+/**
+ * The result of a MongoDB filter is a query object.
+ */
+export type MongoFilterResult = Record<string, any> | undefined;
+
+/**
+ * A higher-order function that accepts filter input and returns a query object.
+ */
+export type MongoFilter<TFilterInput> = (
+    filterInput?: TFilterInput,
+) => MongoFilterResult;
+
+/**
+ * Extract the input type from a MongoFilter.
+ */
+export type MongoFilterInput<T> =
+    T extends MongoFilter<infer TInput> ? TInput : never;
+```
+
+### Step 6: Implement the Entry Point
+
+```typescript mongodb-filter.ts
+/**
+ * Create a filter for MongoDB collections.
+ */
+export const mongoFilter = <Entity>() => {
+    const def = <TFilterDef extends MongoFilterDef<Entity>>(
+        filterDef: TFilterDef & ValidateFilterDef<Entity, TFilterDef>,
+    ): MongoFilter<Simplify<MongoFilterDefInput<Entity, TFilterDef>>> => {
+        return compileFilterDef<Entity, TFilterDef>(filterDef);
+    };
+
+    return { def };
+};
+```
+
+<Note>
+`ValidateFilterDef` provides compile-time validation that filter keys match entity fields (unless explicit `field` properties are provided).
+</Note>
+
+### Step 7: Implement Filter Compilation
+
+Now implement the core logic that transforms filter definitions into backend operations.
+
+#### Compile Filter Definition
+
+```typescript mongodb-filter.ts
+/**
+ * Pre-compiles a filter definition into an optimized function.
+ */
+const compileFilterDef = <Entity, TFilterDef extends MongoFilterDef<Entity>>(
+    filtersDef: TFilterDef,
+): MongoFilter<MongoFilterDefInput<Entity, TFilterDef>> => {
+    // Pre-compile all filters at definition time
+    const compiledFilters = Object.entries(filtersDef).map(
+        ([key, filterDef]) => ({
+            key,
+            compiler: compileFilterField<Entity>(key, filterDef),
+        })
+    );
+
+    // Return the optimized filter function
+    return (filterInput) => {
+        if (!filterInput) {
+            return undefined;
+        }
+
+        const conditions: Record<string, any>[] = [];
+
+        for (const { key, compiler } of compiledFilters) {
+            const filterValue = filterInput[key as keyof typeof filterInput];
+
+            // Skip undefined values
+            if (filterValue === undefined) {
+                continue;
+            }
+
+            const query = compiler(filterValue);
+            if (query) {
+                conditions.push(query);
+            }
+        }
+
+        if (conditions.length === 0) {
+            return undefined;
+        }
+
+        if (conditions.length === 1) {
+            return conditions[0];
+        }
+
+        // Combine with $and
+        return { $and: conditions };
+    };
+};
+```
+
+#### Compile Filter Field
+
+```typescript mongodb-filter.ts
+/**
+ * Compiled filter field that generates a query for a single filter.
+ */
+type CompiledFilterField = (
+    filterValue: unknown
+) => Record<string, any> | undefined;
+
+/**
+ * Pre-compiles a filter field.
+ */
+const compileFilterField = <Entity>(
+    key: string,
+    filterField: MongoFilterField<Entity>,
+): CompiledFilterField => {
+    // Custom filter - call directly
+    if (typeof filterField === "function") {
+        return (filterValue) => filterField(filterValue);
+    }
+
+    switch (filterField.kind) {
+        case "and":
+        case "or":
+            return compileBooleanFilter<Entity>(filterField);
+
+        default:
+            return compilePrimitiveFilter<Entity>(key, filterField);
+    }
+};
+```
+
+#### Compile Primitive Filters
+
+```typescript mongodb-filter.ts
+/**
+ * Pre-compiles a primitive filter.
+ */
+const compilePrimitiveFilter = <Entity>(
+    key: string,
+    filterField: PrimitiveFilter<Entity>,
+): CompiledFilterField => {
+    const fieldName = (filterField.field ?? key) as string;
+
+    switch (filterField.kind) {
+        case "eq":
+            return (filterValue) => ({ [fieldName]: filterValue });
+
+        case "neq":
+            return (filterValue) => ({ [fieldName]: { $ne: filterValue } });
+
+        case "contains":
+            return (filterValue) => ({
+                [fieldName]: {
+                    $regex: String(filterValue),
+                    $options: filterField.caseInsensitive ? "i" : "",
+                },
+            });
+
+        case "inArray":
+            return (filterValue) => ({
+                [fieldName]: { $in: filterValue as unknown[] },
+            });
+
+        case "isNull":
+            return (filterValue) => ({
+                [fieldName]: filterValue ? null : { $ne: null },
+            });
+
+        case "isNotNull":
+            return (filterValue) => ({
+                [fieldName]: filterValue ? { $ne: null } : null,
+            });
+
+        case "gt":
+            return (filterValue) => ({ [fieldName]: { $gt: filterValue } });
+
+        case "gte":
+            return (filterValue) => ({ [fieldName]: { $gte: filterValue } });
+
+        case "lt":
+            return (filterValue) => ({ [fieldName]: { $lt: filterValue } });
+
+        case "lte":
+            return (filterValue) => ({ [fieldName]: { $lte: filterValue } });
+
+        default:
+            filterField satisfies never;
+            return () => undefined;
+    }
+};
+```
+
+<Tip>
+Use `satisfies never` in the default case to ensure exhaustive handling of all filter kinds.
+</Tip>
+
+#### Compile Boolean Filters
+
+```typescript mongodb-filter.ts
+/**
+ * Pre-compiles a boolean filter (and/or).
+ */
+const compileBooleanFilter = <Entity>(
+    filterField: BooleanFilter<Entity>,
+): CompiledFilterField => {
+    const compiledConditions = filterField.conditions.map((condition) =>
+        compilePrimitiveFilter<Entity>(
+            condition.field as string,
+            condition,
+        )
+    );
+
+    switch (filterField.kind) {
+        case "and":
+            return (filterValue) => {
+                const conditions = compiledConditions
+                    .map((compiler) => compiler(filterValue))
+                    .filter((query): query is Record<string, any> =>
+                        query !== undefined
+                    );
+
+                if (conditions.length === 0) return undefined;
+                if (conditions.length === 1) return conditions[0];
+                return { $and: conditions };
+            };
+
+        case "or":
+            return (filterValue) => {
+                const conditions = compiledConditions
+                    .map((compiler) => compiler(filterValue))
+                    .filter((query): query is Record<string, any> =>
+                        query !== undefined
+                    );
+
+                if (conditions.length === 0) return undefined;
+                if (conditions.length === 1) return conditions[0];
+                return { $or: conditions };
+            };
+    }
+};
+```
+
+### Step 8: Usage Example
+
+Now users can use your adapter:
+
+```typescript
+import { mongoFilter } from "./mongodb-filter";
+import type { MongoFilterInput } from "./mongodb-filter";
+
+interface User {
+    name: string;
+    email: string;
+    age: number;
+}
+
+const userFilter = mongoFilter<User>().def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+    // Custom filter
+    isPremium: (isPremium: boolean) => ({
+        subscription: { $eq: isPremium ? "premium" : "free" },
+    }),
+});
+
+type UserFilterInput = MongoFilterInput<typeof userFilter>;
+// { name?: string; emailContains?: string; minAge?: number; isPremium?: boolean }
+
+const query = userFilter({
+    emailContains: "example",
+    minAge: 18,
+});
+
+// Use with MongoDB
+const users = await db.collection("users").find(query).toArray();
+```
+
+## Advanced Features
+
+### Nested Field Support
+
+If your backend supports nested fields, implement a path resolver:
+
+```typescript
+const getNestedValue = (obj: any, path: string): any => {
+    if (!path.includes(".")) return obj[path];
+    return path.split(".").reduce((acc, key) => acc?.[key], obj);
+};
+
+// Use in primitive filter compilation
+const fieldPath = (filterField.field ?? key) as string;
+const fieldName = fieldPath.replace(/\./g, "."); // Handle as needed for your backend
+```
+
+### Performance Optimization
+
+The compilation pattern (pre-compiling filters at definition time) ensures optimal runtime performance:
+
+<CardGroup cols={2}>
+
+<Card title="Definition Time" icon="code">
+- Parse filter definitions
+- Pre-compile filter logic
+- Validate field names
+- One-time setup cost
+</Card>
+
+<Card title="Execution Time" icon="bolt">
+- Simple value lookups
+- No parsing or validation
+- Direct backend operations
+- Minimal overhead
+</Card>
+
+</CardGroup>
+
+### Error Handling
+
+Add helpful error messages for common issues:
+
+```typescript
+const compilePrimitiveFilter = <Entity>(
+    key: string,
+    filterField: PrimitiveFilter<Entity>,
+): CompiledFilterField => {
+    const fieldName = (filterField.field ?? key) as string;
+
+    // Validate field format
+    if (fieldName.includes("__")) {
+        throw new Error(
+            `Invalid field name "${fieldName}". ` +
+            `Double underscores are reserved for internal use.`
+        );
+    }
+
+    // Rest of implementation...
+};
+```
+
+### TypeScript Integration
+
+Ensure your adapter provides excellent TypeScript support:
+
+1. **Export all public types**: Users need access to input and output types
+2. **Use `Simplify<T>`**: Makes complex types readable in IDE hovers
+3. **Leverage `ValidateFilterDef`**: Provides compile-time field validation
+4. **Document with JSDoc**: Add inline documentation for better DX
+
+```typescript
+/**
+ * Create a filter for MongoDB collections.
+ *
+ * @example
+ * ```typescript
+ * const userFilter = mongoFilter<User>().def({
+ *     name: { kind: 'eq' },
+ *     minAge: { kind: 'gte', field: 'age' },
+ * });
+ * ```
+ */
+export const mongoFilter = <Entity>() => {
+    // Implementation
+};
+```
+
+## Testing Your Adapter
+
+Create comprehensive tests for your adapter:
+
+```typescript mongodb-filter.spec.ts
+import { describe, expect, it } from "vitest";
+import { mongoFilter } from "./mongodb-filter";
+
+interface User {
+    name: string;
+    age: number;
+}
+
+describe("mongoFilter", () => {
+    it("should compile eq filter", () => {
+        const filter = mongoFilter<User>().def({
+            name: { kind: "eq" },
+        });
+
+        const query = filter({ name: "John" });
+        expect(query).toEqual({ name: "John" });
+    });
+
+    it("should compile gte filter", () => {
+        const filter = mongoFilter<User>().def({
+            minAge: { kind: "gte", field: "age" },
+        });
+
+        const query = filter({ minAge: 18 });
+        expect(query).toEqual({ age: { $gte: 18 } });
+    });
+
+    it("should combine multiple filters with $and", () => {
+        const filter = mongoFilter<User>().def({
+            name: { kind: "eq" },
+            minAge: { kind: "gte", field: "age" },
+        });
+
+        const query = filter({ name: "John", minAge: 18 });
+        expect(query).toEqual({
+            $and: [
+                { name: "John" },
+                { age: { $gte: 18 } },
+            ],
+        });
+    });
+
+    it("should handle custom filters", () => {
+        const filter = mongoFilter<User>().def({
+            isPremium: (isPremium: boolean) => ({
+                subscription: { $eq: isPremium ? "premium" : "free" },
+            }),
+        });
+
+        const query = filter({ isPremium: true });
+        expect(query).toEqual({
+            subscription: { $eq: "premium" },
+        });
+    });
+});
+```
+
+## Publishing Your Adapter
+
+When publishing your adapter:
+
+1. **Name it consistently**: Use the pattern `@filter-def/<backend-name>`
+2. **Export core types**: Re-export commonly used types from `@filter-def/core`
+3. **Document thoroughly**: Include README with examples and API reference
+4. **Add TypeScript support**: Include declaration files
+5. **Test extensively**: Cover all filter kinds and edge cases
+
+### Package Structure
+
+```
+@filter-def/mongodb/
+├── src/
+│   ├── index.ts              # Entry point (exports all public APIs)
+│   ├── mongodb-filter.ts     # Main implementation
+│   └── mongodb-filter.spec.ts # Tests
+├── package.json
+├── tsconfig.json
+└── README.md
+```
+
+### Example package.json
+
+```json package.json
+{
+  "name": "@filter-def/mongodb",
+  "version": "1.0.0",
+  "description": "MongoDB adapter for filter-def",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.cts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs"
+    }
+  },
+  "dependencies": {
+    "@filter-def/core": "^1.0.0"
+  },
+  "peerDependencies": {
+    "mongodb": "^6.0.0"
+  }
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Best Practices" icon="star" href="/guides/best-practices">
+Learn best practices for using filter-def adapters
+</Card>
+
+<Card title="API Reference" icon="book" href="/api/core/types">
+Explore the complete API documentation
+</Card>
+
+<Card title="Core Types" icon="code" href="/api/core/filter-kinds">
+Learn about core type utilities for adapter authors
+</Card>
+
+<Card title="Adapters" icon="lightbulb" href="/adapters/in-memory">
+See real-world adapter implementations
+</Card>
+
+</CardGroup>
+
+## Community Adapters
+
+If you've built an adapter, consider:
+
+1. Opening a PR to add it to the official adapter list
+2. Sharing it on GitHub with the `filter-def` topic
+3. Writing a blog post about your implementation
+
+Need help building an adapter? [Open a discussion](https://github.com/rmarganti/filter-def/discussions) on GitHub.

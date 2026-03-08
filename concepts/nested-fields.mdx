@@ -1,0 +1,439 @@
+---
+title: Nested Fields
+description: Filter on nested object properties using dot notation
+---
+
+## Overview
+
+Filter-def supports filtering on nested object properties using dot-separated paths. This allows you to filter based on deeply nested data without flattening your entity structure.
+
+## Dot Notation Syntax
+
+Use dot-separated strings to reference nested properties:
+
+```typescript
+interface Employee {
+  name: {
+    first: string;
+    last: string;
+  };
+  address: {
+    city: string;
+    state: string;
+    geo: {
+      lat: number;
+      lng: number;
+    };
+  };
+  department: string;
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+  firstName: { kind: 'eq', field: 'name.first' },
+  lastName: { kind: 'eq', field: 'name.last' },
+  city: { kind: 'contains', field: 'address.city' },
+  state: { kind: 'eq', field: 'address.state' },
+  minLatitude: { kind: 'gte', field: 'address.geo.lat' },
+  minLongitude: { kind: 'gte', field: 'address.geo.lng' },
+  department: { kind: 'eq' },  // Flat field, no nesting
+});
+```
+
+## Type Safety
+
+Nested field paths are fully type-checked using TypeScript's type system:
+
+```typescript
+const employeeFilter = inMemoryFilter<Employee>().def({
+  // ✅ Valid nested paths
+  firstName: { kind: 'eq', field: 'name.first' },
+  city: { kind: 'contains', field: 'address.city' },
+  latitude: { kind: 'gte', field: 'address.geo.lat' },
+  
+  // ❌ TypeScript errors
+  invalid: { kind: 'eq', field: 'name.middle' },  // Error: 'middle' doesn't exist
+  wrongType: { kind: 'eq', field: 'address.geo' },  // Error: 'geo' is object, not primitive
+});
+```
+
+The `FieldPath<T>` type generates all valid dot-separated paths for your entity:
+
+```typescript
+import type { FieldPath } from '@filter-def/core';
+
+type EmployeePaths = FieldPath<Employee>;
+// "name" | "name.first" | "name.last" | 
+// "address" | "address.city" | "address.state" | 
+// "address.geo" | "address.geo.lat" | "address.geo.lng" | 
+// "department"
+```
+
+## Basic Example
+
+<CodeGroup>
+```typescript In-Memory
+import { inMemoryFilter } from '@filter-def/in-memory';
+
+interface Employee {
+  name: { first: string; last: string };
+  department: string;
+  address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const employeeFilter = inMemoryFilter<Employee>().def({
+  firstName: { kind: 'eq', field: 'name.first' },
+  lastName: { kind: 'eq', field: 'name.last' },
+  department: { kind: 'eq' },
+  cityContains: {
+    kind: 'contains',
+    field: 'address.city',
+    caseInsensitive: true,
+  },
+  minLatitude: { kind: 'gte', field: 'address.geo.lat' },
+});
+
+const employees: Employee[] = [
+  {
+    name: { first: 'Alice', last: 'Chen' },
+    department: 'engineering',
+    address: { city: 'Portland', geo: { lat: 45.5, lng: -122.7 } },
+  },
+  {
+    name: { first: 'Bob', last: 'Smith' },
+    department: 'design',
+    address: { city: 'Seattle', geo: { lat: 47.6, lng: -122.3 } },
+  },
+];
+
+// Filter by nested name field
+const chenEmployees = employees.filter(
+  employeeFilter({ lastName: 'Chen' })
+);
+
+// Combine nested and flat fields
+const chenEngineers = employees.filter(
+  employeeFilter({ lastName: 'Chen', department: 'engineering' })
+);
+
+// Search nested string field
+const portlandArea = employees.filter(
+  employeeFilter({ cityContains: 'port' })
+);
+
+// Filter on deeply nested numeric field
+const northernEmployees = employees.filter(
+  employeeFilter({ minLatitude: 46 })
+);
+```
+
+```typescript BigQuery
+import { bigqueryFilter } from '@filter-def/bigquery';
+
+const employeeFilter = bigqueryFilter<Employee>().def({
+  firstName: { kind: 'eq', field: 'name.first' },
+  lastName: { kind: 'eq', field: 'name.last' },
+  cityContains: { kind: 'contains', field: 'address.city' },
+  minLatitude: { kind: 'gte', field: 'address.geo.lat' },
+});
+
+const { sql, params } = employeeFilter({
+  lastName: 'Chen',
+  minLatitude: 46,
+});
+
+// SQL uses dot notation for nested fields:
+// name.last = @lastName AND address.geo.lat >= @minLatitude
+
+const [rows] = await bigquery.query({
+  query: `SELECT * FROM \`dataset.employees\` WHERE ${sql}`,
+  params,
+});
+```
+</CodeGroup>
+
+## Combining with All Filter Types
+
+Nested fields work with all primitive filter types:
+
+```typescript
+interface Product {
+  name: string;
+  price: number;
+  metadata: {
+    tags: string[];
+    dimensions: {
+      width: number;
+      height: number;
+      depth: number;
+    };
+    ratings: {
+      average: number;
+      count: number;
+    };
+  };
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+  // Equality filters on nested fields
+  avgRating: { kind: 'eq', field: 'metadata.ratings.average' },
+  
+  // Comparison filters on nested fields
+  minWidth: { kind: 'gte', field: 'metadata.dimensions.width' },
+  maxHeight: { kind: 'lte', field: 'metadata.dimensions.height' },
+  
+  // String filters on nested fields
+  dimensionSearch: { kind: 'contains', field: 'metadata.dimensions' },
+  
+  // Null checks on nested fields
+  hasRatings: { kind: 'isNotNull', field: 'metadata.ratings.count' },
+});
+
+const filtered = products.filter(productFilter({
+  minWidth: 10,
+  maxHeight: 50,
+  hasRatings: true,
+}));
+```
+
+## Nested Fields in Boolean Filters
+
+Nested fields work seamlessly in boolean filters:
+
+```typescript
+const employeeFilter = inMemoryFilter<Employee>().def({
+  // OR filter across nested fields
+  nameSearch: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name.first' },
+      { kind: 'contains', field: 'name.last' },
+    ],
+  },
+  
+  // AND filter on nested fields
+  inRegion: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'address.geo.lat' },
+      { kind: 'lte', field: 'address.geo.lat' },
+    ],
+  },
+});
+
+const results = employees.filter(employeeFilter({
+  nameSearch: 'chen',
+  inRegion: 45.0,  // Both conditions use this value
+}));
+```
+
+## Adapter Support
+
+<Note>
+Nested field support varies by adapter based on their underlying data model.
+</Note>
+
+| Adapter | Nested Fields Support | Notes |
+|---------|----------------------|-------|
+| **In-Memory** | ✅ Full support | Works with any nested JavaScript object |
+| **BigQuery** | ✅ Full support | Uses dot notation for nested JSON/STRUCT fields |
+| **Drizzle** | ❌ Not supported | Drizzle operates on flat table columns |
+
+### Drizzle Limitation
+
+Drizzle filters operate on flat SQL table columns and do not support nested field paths:
+
+```typescript
+import { drizzleFilter } from '@filter-def/drizzle';
+import { pgTable, text, jsonb } from 'drizzle-orm/pg-core';
+
+const employeesTable = pgTable('employees', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  metadata: jsonb('metadata'),  // JSON column
+});
+
+// ❌ This will throw an error at runtime
+const employeeFilter = drizzleFilter(employeesTable).def({
+  firstName: { kind: 'eq', field: 'metadata.name.first' },
+  // Error: Nested field path "metadata.name.first" is not supported
+});
+```
+
+**Error Message:**
+```
+Nested field path "metadata.name.first" is not supported by drizzleFilter.
+Drizzle operates on flat table columns. Use a custom filter with JSON
+operators or joins for nested data.
+```
+
+#### Workaround: Custom Filters
+
+For nested JSON data in Drizzle, use custom filters with JSON operators:
+
+```typescript
+import { sql } from 'drizzle-orm';
+
+const employeeFilter = drizzleFilter(employeesTable).def({
+  // Use custom filter for JSON field access
+  firstName: (name: string) =>
+    sql`${employeesTable.metadata}->>'name'->>'first' = ${name}`,
+  
+  // PostgreSQL JSON operators
+  minLatitude: (lat: number) =>
+    sql`(${employeesTable.metadata}->'address'->'geo'->>'lat')::numeric >= ${lat}`,
+});
+
+const where = employeeFilter({ firstName: 'Alice', minLatitude: 45 });
+await db.select().from(employeesTable).where(where);
+```
+
+## PathValue Type
+
+The `PathValue<T, Path>` utility type resolves the type at a nested path:
+
+```typescript
+import type { PathValue } from '@filter-def/core';
+
+interface Employee {
+  name: { first: string; last: string };
+  address: { city: string; geo: { lat: number; lng: number } };
+}
+
+type FirstName = PathValue<Employee, 'name.first'>;
+// string
+
+type Latitude = PathValue<Employee, 'address.geo.lat'>;
+// number
+
+type Address = PathValue<Employee, 'address'>;
+// { city: string; geo: { lat: number; lng: number } }
+```
+
+This type is used internally to ensure nested field filters have correct input types.
+
+## Deep Nesting
+
+Filter-def supports up to 4 levels of nesting by default to avoid TypeScript instantiation depth errors:
+
+```typescript
+interface DeepNested {
+  level1: {
+    level2: {
+      level3: {
+        level4: {
+          value: string;  // 4 levels deep - supported ✅
+          level5: {
+            value: string;  // 5 levels deep - not in FieldPath ❌
+          };
+        };
+      };
+    };
+  };
+}
+
+const filter = inMemoryFilter<DeepNested>().def({
+  // ✅ Works: 4 levels
+  deep: { kind: 'eq', field: 'level1.level2.level3.level4.value' },
+  
+  // ❌ May not be typed: 5 levels
+  tooDeep: { kind: 'eq', field: 'level1.level2.level3.level4.level5.value' },
+});
+```
+
+<Info>
+The depth limit exists only for type inference. Nested field access still works at runtime for deeper structures, but TypeScript won't validate paths beyond 4 levels.
+</Info>
+
+## Null Safety
+
+Nested field access handles null/undefined gracefully:
+
+```typescript
+interface User {
+  profile?: {
+    address?: {
+      city?: string;
+    };
+  };
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  city: { kind: 'eq', field: 'profile.address.city' },
+});
+
+const users: User[] = [
+  { profile: { address: { city: 'Portland' } } },  // Matches
+  { profile: { address: {} } },  // No match (city is undefined)
+  { profile: {} },  // No match (address is undefined)
+  {},  // No match (profile is undefined)
+];
+
+const results = users.filter(userFilter({ city: 'Portland' }));
+// Returns only the first user
+```
+
+Nested field access returns `undefined` if any intermediate property is null or undefined.
+
+## Best Practices
+
+### Use Descriptive Filter Keys
+
+```typescript
+// ❌ Confusing
+const filter = inMemoryFilter<Employee>().def({
+  f: { kind: 'eq', field: 'name.first' },
+  l: { kind: 'eq', field: 'name.last' },
+});
+
+// ✅ Clear and descriptive
+const filter = inMemoryFilter<Employee>().def({
+  firstName: { kind: 'eq', field: 'name.first' },
+  lastName: { kind: 'eq', field: 'name.last' },
+});
+```
+
+### Consider Flattening for SQL
+
+If using Drizzle, consider flattening your schema:
+
+```typescript
+// Instead of nested objects
+interface Employee {
+  name: { first: string; last: string };
+}
+
+// Use flat columns
+const employeesTable = pgTable('employees', {
+  firstName: text('first_name').notNull(),
+  lastName: text('last_name').notNull(),
+});
+
+const filter = drizzleFilter(employeesTable).def({
+  firstName: { kind: 'eq' },  // No nesting needed ✅
+  lastName: { kind: 'eq' },
+});
+```
+
+### Validate Nested Paths
+
+TypeScript validates nested paths, but be careful with dynamic paths:
+
+```typescript
+// ❌ Runtime error if path is invalid
+const dynamicPath = getUserInputPath();  // Could be anything
+const filter = inMemoryFilter<Employee>().def({
+  dynamic: { kind: 'eq', field: dynamicPath as any },  // Dangerous!
+});
+
+// ✅ Use a whitelist of valid paths
+const VALID_PATHS = ['name.first', 'name.last', 'address.city'] as const;
+if (VALID_PATHS.includes(dynamicPath)) {
+  // Safe to use
+}
+```
+
+## Next Steps
+
+- [Filter Types](/concepts/filter-types) - All available primitive filters
+- [Custom Filters](/concepts/custom-filters) - Complex logic for nested data
+- [Type Inference](/concepts/type-inference) - Understand TypeScript utilities

@@ -1,0 +1,404 @@
+---
+title: drizzleFilter
+description: Generate type-safe SQL queries for Drizzle ORM
+---
+
+The `drizzleFilter` function creates filters that generate Drizzle SQL expressions for use with `.where()` clauses.
+
+## Function Signature
+
+```typescript
+function drizzleFilter<TTable extends Table>(table: TTable): {
+  def<TFilterDef extends DrizzleFilterDef<Entity>>(
+    filterDef: TFilterDef & ValidateFilterDef<Entity, TFilterDef>
+  ): DrizzleFilter<Simplify<DrizzleFilterDefInput<Entity, TFilterDef>>>;
+};
+```
+
+<ParamField path="table" type="Table" required>
+  A Drizzle table definition (from `pgTable`, `mysqlTable`, etc.)
+</ParamField>
+
+## Usage
+
+### Basic Example
+
+```typescript
+import { drizzleFilter } from '@filter-def/drizzle';
+import { pgTable, text, integer } from 'drizzle-orm/pg-core';
+
+const usersTable = pgTable('users', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  email: text('email').notNull(),
+  age: integer('age'),
+});
+
+// Define the filter
+const userFilter = drizzleFilter(usersTable).def({
+  name: { kind: 'eq' },
+  emailContains: { kind: 'contains', field: 'email' },
+  age: { kind: 'gte' },
+});
+
+// Use with Drizzle
+const where = userFilter({
+  emailContains: '@example.com',
+  age: 18,
+});
+
+const users = await db.select().from(usersTable).where(where);
+```
+
+### Step-by-Step
+
+<Steps>
+  <Step title="Define your Drizzle table">
+    ```typescript
+    import { pgTable, text, integer } from 'drizzle-orm/pg-core';
+    
+    const usersTable = pgTable('users', {
+      id: integer('id').primaryKey(),
+      name: text('name').notNull(),
+      email: text('email').notNull(),
+    });
+    ```
+  </Step>
+  
+  <Step title="Create a filter definition">
+    ```typescript
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      olderThan: { kind: 'gt', field: 'age' },
+    });
+    ```
+  </Step>
+  
+  <Step title="Apply the filter in queries">
+    ```typescript
+    const where = userFilter({ name: 'John' });
+    const johns = await db.select().from(usersTable).where(where);
+    ```
+  </Step>
+</Steps>
+
+## Types
+
+### DrizzleFilter
+
+```typescript
+type DrizzleFilter<TFilterInput> = (
+  filterInput?: TFilterInput
+) => SQL | undefined;
+```
+
+A higher-order function that accepts filter input and returns a Drizzle SQL expression.
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Object containing filter values. Omitted filters are ignored.
+</ParamField>
+
+<ResponseField name="Returns" type="SQL | undefined">
+  - A Drizzle SQL expression when filters are provided
+  - `undefined` when no filters match (lets Drizzle skip the WHERE clause)
+</ResponseField>
+
+### DrizzleFilterInput
+
+```typescript
+type DrizzleFilterInput<T> = 
+  T extends DrizzleFilter<infer TInput> ? TInput : never;
+```
+
+Extracts the input type from a `DrizzleFilter`.
+
+```typescript
+const userFilter = drizzleFilter(usersTable).def({ ... });
+type UserFilterInput = DrizzleFilterInput<typeof userFilter>;
+```
+
+### DrizzleFilterDef
+
+```typescript
+type DrizzleFilterDef<Entity> = Record<string, DrizzleFilterField<Entity>>;
+```
+
+A record mapping filter names to filter field definitions.
+
+### DrizzleCustomFilter
+
+```typescript
+type DrizzleCustomFilter<Input> = (input: Input) => SQL | undefined;
+```
+
+A custom filter function that accepts input and returns SQL.
+
+<ParamField path="input" type="Input" required>
+  The filter input value
+</ParamField>
+
+<ResponseField name="Returns" type="SQL | undefined">
+  A Drizzle SQL expression, or `undefined` to skip this filter
+</ResponseField>
+
+## Examples
+
+### All Core Filter Types
+
+```typescript
+import { pgTable, text, integer, timestamp } from 'drizzle-orm/pg-core';
+
+const productsTable = pgTable('products', {
+  id: integer('id').primaryKey(),
+  name: text('name').notNull(),
+  description: text('description'),
+  price: integer('price').notNull(),
+  category: text('category').notNull(),
+  createdAt: timestamp('created_at').notNull(),
+});
+
+const productFilter = drizzleFilter(productsTable).def({
+  // Equality
+  id: { kind: 'eq' },
+  category: { kind: 'eq' },
+  
+  // Not equal
+  excludeCategory: { kind: 'neq', field: 'category' },
+  
+  // String contains
+  nameContains: { kind: 'contains', field: 'name' },
+  descriptionContains: { kind: 'contains', field: 'description', caseInsensitive: true },
+  
+  // Array membership
+  categories: { kind: 'inArray', field: 'category' },
+  
+  // Null checks
+  hasDescription: { kind: 'isNotNull', field: 'description' },
+  
+  // Comparisons
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  createdAfter: { kind: 'gte', field: 'createdAt' },
+  
+  // Boolean filters
+  priceRange: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'price' },
+      { kind: 'lte', field: 'price' },
+    ],
+  },
+  
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'description' },
+    ],
+  },
+});
+
+const where = productFilter({
+  categories: ['electronics', 'computers'],
+  minPrice: 100,
+  maxPrice: 1000,
+  search: 'laptop',
+});
+
+const products = await db.select().from(productsTable).where(where);
+```
+
+### Custom Filters
+
+```typescript
+import { sql } from 'drizzle-orm';
+
+const userFilter = drizzleFilter(usersTable).def({
+  name: { kind: 'eq' },
+  
+  // Custom filter: age is divisible by N
+  ageDivisibleBy: (divisor: number) => 
+    sql`${usersTable.age} % ${divisor} = 0`,
+  
+  // Custom filter: full-text search (PostgreSQL)
+  fullTextSearch: (query: string) => 
+    sql`to_tsvector('english', ${usersTable.name} || ' ' || ${usersTable.bio}) @@ plainto_tsquery('english', ${query})`,
+  
+  // Custom filter: date within range
+  createdInLastDays: (days: number) => 
+    sql`${usersTable.createdAt} >= NOW() - INTERVAL '${days} days'`,
+});
+
+const where = userFilter({
+  ageDivisibleBy: 5,
+  fullTextSearch: 'engineer',
+  createdInLastDays: 30,
+});
+
+const users = await db.select().from(usersTable).where(where);
+```
+
+### Complex Queries
+
+```typescript
+// Pagination with filters
+const where = productFilter({ category: 'electronics' });
+const products = await db
+  .select()
+  .from(productsTable)
+  .where(where)
+  .limit(20)
+  .offset(0);
+
+// Joins with filters
+const orderFilter = drizzleFilter(ordersTable).def({
+  status: { kind: 'eq' },
+  createdAfter: { kind: 'gte', field: 'createdAt' },
+});
+
+const where = orderFilter({ status: 'completed' });
+const ordersWithUsers = await db
+  .select()
+  .from(ordersTable)
+  .leftJoin(usersTable, eq(ordersTable.userId, usersTable.id))
+  .where(where);
+
+// Count with filters
+const where = userFilter({ age: 18 });
+const [{ count }] = await db
+  .select({ count: sql<number>`count(*)` })
+  .from(usersTable)
+  .where(where);
+```
+
+### Database-Specific Features
+
+<Tabs>
+  <Tab title="PostgreSQL">
+    ```typescript
+    import { pgTable, text, integer, jsonb } from 'drizzle-orm/pg-core';
+    import { sql } from 'drizzle-orm';
+    
+    const usersTable = pgTable('users', {
+      id: integer('id').primaryKey(),
+      name: text('name').notNull(),
+      metadata: jsonb('metadata'),
+    });
+    
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      
+      // JSON field query
+      hasRole: (role: string) => 
+        sql`${usersTable.metadata}->>'role' = ${role}`,
+      
+      // Array contains
+      hasTag: (tag: string) => 
+        sql`${usersTable.metadata}->'tags' ? ${tag}`,
+    });
+    ```
+  </Tab>
+  
+  <Tab title="MySQL">
+    ```typescript
+    import { mysqlTable, varchar, int, json } from 'drizzle-orm/mysql-core';
+    import { sql } from 'drizzle-orm';
+    
+    const usersTable = mysqlTable('users', {
+      id: int('id').primaryKey(),
+      name: varchar('name', { length: 255 }).notNull(),
+      metadata: json('metadata'),
+    });
+    
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      
+      // JSON field query
+      hasRole: (role: string) => 
+        sql`JSON_EXTRACT(${usersTable.metadata}, '$.role') = ${role}`,
+    });
+    ```
+  </Tab>
+  
+  <Tab title="SQLite">
+    ```typescript
+    import { sqliteTable, text, integer } from 'drizzle-orm/sqlite-core';
+    import { sql } from 'drizzle-orm';
+    
+    const usersTable = sqliteTable('users', {
+      id: integer('id').primaryKey(),
+      name: text('name').notNull(),
+      metadata: text('metadata'), // JSON as text
+    });
+    
+    const userFilter = drizzleFilter(usersTable).def({
+      name: { kind: 'eq' },
+      
+      // JSON field query
+      hasRole: (role: string) => 
+        sql`json_extract(${usersTable.metadata}, '$.role') = ${role}`,
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Limitations
+
+<Warning>
+  **Nested fields are not supported**. Drizzle operates on flat table columns.
+  
+  ```typescript
+  // ❌ This will throw an error
+  const filter = drizzleFilter(usersTable).def({
+    firstName: { kind: 'eq', field: 'name.first' }, // Error!
+  });
+  ```
+  
+  Use custom filters with JSON operators for nested data:
+  
+  ```typescript
+  // ✅ Use custom filters for nested data
+  const filter = drizzleFilter(usersTable).def({
+    firstName: (value: string) => 
+      sql`${usersTable.metadata}->>'firstName' = ${value}`,
+  });
+  ```
+</Warning>
+
+## Generated SQL
+
+Here's what SQL gets generated for different filters:
+
+```typescript
+const userFilter = drizzleFilter(usersTable).def({
+  name: { kind: 'eq' },
+  age: { kind: 'gte' },
+  emailContains: { kind: 'contains', field: 'email', caseInsensitive: true },
+});
+
+const where = userFilter({ 
+  name: 'John', 
+  age: 18,
+  emailContains: 'example',
+});
+
+// Generated SQL (PostgreSQL):
+// WHERE "name" = 'John' AND "age" >= 18 AND "email" ILIKE '%example%'
+
+// Generated SQL (MySQL):
+// WHERE `name` = 'John' AND `age` >= 18 AND `email` LIKE '%example%'
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Core Types" icon="code" href="/api/core/types">
+    All available filter types
+  </Card>
+  <Card title="Custom Filters" icon="wand-magic-sparkles" href="/concepts/custom-filters">
+    Learn how to write custom SQL filters
+  </Card>
+  <Card title="Drizzle ORM Docs" icon="book" href="https://orm.drizzle.team">
+    Official Drizzle documentation
+  </Card>
+</CardGroup>

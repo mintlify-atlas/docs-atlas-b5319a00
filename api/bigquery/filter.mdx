@@ -1,0 +1,501 @@
+---
+title: bigqueryFilter
+description: Generate parameterized SQL queries for Google BigQuery
+---
+
+The `bigqueryFilter` function creates filters that generate parameterized SQL queries compatible with Google Cloud BigQuery.
+
+## Function Signature
+
+```typescript
+function bigqueryFilter<Entity>(): {
+  def<TFilterDef extends BigQueryFilterDef<Entity>>(
+    filterDef: TFilterDef & ValidateFilterDef<Entity, TFilterDef>
+  ): BigQueryFilter<Simplify<BigQueryFilterDefInput<Entity, TFilterDef>>>;
+};
+```
+
+## Usage
+
+### Basic Example
+
+```typescript
+import { bigqueryFilter } from '@filter-def/bigquery';
+import { BigQuery } from '@google-cloud/bigquery';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  age: number;
+}
+
+// Define the filter
+const userFilter = bigqueryFilter<User>().def({
+  name: { kind: 'eq' },
+  emailContains: { kind: 'contains', field: 'email', caseInsensitive: true },
+  age: { kind: 'gte' },
+});
+
+// Generate SQL and params
+const { sql, params } = userFilter({
+  emailContains: '@example.com',
+  age: 18,
+});
+
+console.log(sql);    // "email ILIKE @emailContains AND age >= @age"
+console.log(params); // { emailContains: '%@example.com%', age: 18 }
+
+// Use with BigQuery
+const bigquery = new BigQuery();
+const [rows] = await bigquery.query({
+  query: `SELECT * FROM \`myproject.dataset.users\` WHERE ${sql}`,
+  params,
+});
+```
+
+### Step-by-Step
+
+<Steps>
+  <Step title="Define your entity type">
+    ```typescript
+    interface User {
+      id: string;
+      name: string;
+      age: number;
+    }
+    ```
+  </Step>
+  
+  <Step title="Create a filter definition">
+    ```typescript
+    const userFilter = bigqueryFilter<User>().def({
+      name: { kind: 'eq' },
+      olderThan: { kind: 'gt', field: 'age' },
+    });
+    ```
+  </Step>
+  
+  <Step title="Generate SQL and use in queries">
+    ```typescript
+    const { sql, params } = userFilter({ name: 'John' });
+    const [rows] = await bigquery.query({
+      query: `SELECT * FROM \`project.dataset.users\` WHERE ${sql}`,
+      params,
+    });
+    ```
+  </Step>
+</Steps>
+
+## Types
+
+### BigQueryFilter
+
+```typescript
+type BigQueryFilter<TFilterInput> = (
+  filterInput?: TFilterInput
+) => BigQueryFilterResult;
+```
+
+A higher-order function that accepts filter input and returns SQL with parameters.
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Object containing filter values. Omitted filters are ignored.
+</ParamField>
+
+<ResponseField name="Returns" type="BigQueryFilterResult">
+  Object containing `sql` (string) and `params` (object)
+</ResponseField>
+
+### BigQueryFilterResult
+
+```typescript
+interface BigQueryFilterResult {
+  sql: string;
+  params: Record<string, unknown>;
+}
+```
+
+The result of applying a BigQuery filter.
+
+<ParamField path="sql" type="string">
+  SQL WHERE clause fragment with parameterized placeholders (e.g., `@name`, `@age`)
+</ParamField>
+
+<ParamField path="params" type="Record<string, unknown>">
+  Object mapping parameter names to their values
+</ParamField>
+
+### BigQueryFilterInput
+
+```typescript
+type BigQueryFilterInput<T> = 
+  T extends BigQueryFilter<infer TInput> ? TInput : never;
+```
+
+Extracts the input type from a `BigQueryFilter`.
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({ ... });
+type UserFilterInput = BigQueryFilterInput<typeof userFilter>;
+```
+
+### BigQueryFilterDef
+
+```typescript
+type BigQueryFilterDef<Entity> = Record<string, BigQueryFilterField<Entity>>;
+```
+
+A record mapping filter names to filter field definitions.
+
+### BigQueryCustomFilter
+
+```typescript
+type BigQueryCustomFilter<Input> = (
+  input: Input
+) => BigQueryFilterResult;
+```
+
+A custom filter function that accepts input and returns SQL with params.
+
+<ParamField path="input" type="Input" required>
+  The filter input value
+</ParamField>
+
+<ResponseField name="Returns" type="BigQueryFilterResult">
+  Object with `sql` and `params`
+</ResponseField>
+
+## Examples
+
+### All Core Filter Types
+
+```typescript
+interface Product {
+  id: string;
+  name: string;
+  description?: string;
+  price: number;
+  category: string;
+  tags: string[];
+  createdAt: Date;
+}
+
+const productFilter = bigqueryFilter<Product>().def({
+  // Equality
+  id: { kind: 'eq' },
+  category: { kind: 'eq' },
+  
+  // Not equal
+  excludeCategory: { kind: 'neq', field: 'category' },
+  
+  // String contains
+  nameContains: { kind: 'contains', field: 'name' },
+  descriptionContains: { kind: 'contains', field: 'description', caseInsensitive: true },
+  
+  // Array membership
+  categories: { kind: 'inArray', field: 'category' },
+  
+  // Null checks
+  hasDescription: { kind: 'isNotNull', field: 'description' },
+  
+  // Comparisons
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  createdAfter: { kind: 'gte', field: 'createdAt' },
+  
+  // Boolean filters
+  priceRange: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'price' },
+      { kind: 'lte', field: 'price' },
+    ],
+  },
+  
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'description' },
+    ],
+  },
+});
+
+const { sql, params } = productFilter({
+  categories: ['electronics', 'computers'],
+  minPrice: 100,
+  maxPrice: 1000,
+  search: 'laptop',
+});
+
+const [rows] = await bigquery.query({
+  query: `SELECT * FROM \`project.dataset.products\` WHERE ${sql}`,
+  params,
+});
+```
+
+### Custom Filters
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+  name: { kind: 'eq' },
+  
+  // Custom filter: age is divisible by N
+  ageDivisibleBy: (divisor: number) => ({
+    sql: 'MOD(age, @divisor) = 0',
+    params: { divisor },
+  }),
+  
+  // Custom filter: created in last N days
+  createdInLastDays: (days: number) => ({
+    sql: 'created_at >= DATE_SUB(CURRENT_DATE(), INTERVAL @days DAY)',
+    params: { days },
+  }),
+  
+  // Custom filter: JSON field query
+  hasRole: (role: string) => ({
+    sql: 'JSON_VALUE(metadata, "$.role") = @role',
+    params: { role },
+  }),
+});
+
+const { sql, params } = userFilter({
+  ageDivisibleBy: 5,
+  createdInLastDays: 30,
+  hasRole: 'admin',
+});
+```
+
+### Complete Query Example
+
+```typescript
+import { BigQuery } from '@google-cloud/bigquery';
+
+interface Event {
+  id: string;
+  userId: string;
+  eventType: string;
+  timestamp: Date;
+  properties: Record<string, any>;
+}
+
+const eventFilter = bigqueryFilter<Event>().def({
+  userId: { kind: 'eq' },
+  eventType: { kind: 'inArray' },
+  timestampAfter: { kind: 'gte', field: 'timestamp' },
+  timestampBefore: { kind: 'lte', field: 'timestamp' },
+});
+
+async function getEvents(filters: {
+  userId?: string;
+  eventType?: string[];
+  timestampAfter?: Date;
+  timestampBefore?: Date;
+}) {
+  const { sql, params } = eventFilter(filters);
+  
+  const bigquery = new BigQuery({
+    projectId: 'my-project',
+  });
+  
+  const query = `
+    SELECT *
+    FROM \`my-project.analytics.events\`
+    WHERE ${sql}
+    ORDER BY timestamp DESC
+    LIMIT 1000
+  `;
+  
+  const [rows] = await bigquery.query({ query, params });
+  return rows as Event[];
+}
+
+// Usage
+const events = await getEvents({
+  userId: 'user-123',
+  eventType: ['page_view', 'click'],
+  timestampAfter: new Date('2024-01-01'),
+});
+```
+
+### Pagination Example
+
+```typescript
+interface PaginationParams {
+  limit: number;
+  offset: number;
+}
+
+async function getProductsPaginated(
+  filters: { category?: string; minPrice?: number },
+  pagination: PaginationParams,
+) {
+  const { sql, params } = productFilter(filters);
+  
+  const query = `
+    SELECT *
+    FROM \`project.dataset.products\`
+    WHERE ${sql}
+    ORDER BY created_at DESC
+    LIMIT @limit
+    OFFSET @offset
+  `;
+  
+  const [rows] = await bigquery.query({
+    query,
+    params: {
+      ...params,
+      limit: pagination.limit,
+      offset: pagination.offset,
+    },
+  });
+  
+  return rows;
+}
+
+const page1 = await getProductsPaginated(
+  { category: 'electronics' },
+  { limit: 20, offset: 0 },
+);
+
+const page2 = await getProductsPaginated(
+  { category: 'electronics' },
+  { limit: 20, offset: 20 },
+);
+```
+
+### Aggregation Example
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+  status: { kind: 'eq' },
+  createdAfter: { kind: 'gte', field: 'created_at' },
+});
+
+async function getUserStats(filters: { status?: string; createdAfter?: Date }) {
+  const { sql, params } = userFilter(filters);
+  
+  const query = `
+    SELECT
+      COUNT(*) as total_users,
+      AVG(age) as avg_age,
+      MIN(age) as min_age,
+      MAX(age) as max_age
+    FROM \`project.dataset.users\`
+    WHERE ${sql}
+  `;
+  
+  const [rows] = await bigquery.query({ query, params });
+  return rows[0];
+}
+
+const stats = await getUserStats({ 
+  status: 'active',
+  createdAfter: new Date('2024-01-01'),
+});
+```
+
+## Generated SQL
+
+Here's what SQL gets generated for different filters:
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+  name: { kind: 'eq' },
+  age: { kind: 'gte' },
+  emailContains: { kind: 'contains', field: 'email', caseInsensitive: true },
+  status: { kind: 'inArray' },
+});
+
+const { sql, params } = userFilter({ 
+  name: 'John', 
+  age: 18,
+  emailContains: 'example',
+  status: ['active', 'pending'],
+});
+
+// Generated SQL:
+// name = @name AND age >= @age AND LOWER(email) LIKE LOWER(@emailContains) AND status IN UNNEST(@status)
+
+// Generated params:
+// {
+//   name: 'John',
+//   age: 18,
+//   emailContains: '%example%',
+//   status: ['active', 'pending']
+// }
+```
+
+## SQL Injection Prevention
+
+All values are passed as parameters, preventing SQL injection:
+
+```typescript
+// ✅ SAFE: All user input is parameterized
+const { sql, params } = userFilter({ 
+  name: userInput,  // Could be anything, but it's parameterized
+});
+
+const query = `SELECT * FROM users WHERE ${sql}`;
+await bigquery.query({ query, params });
+
+// ❌ DANGEROUS: Never do this
+const query = `SELECT * FROM users WHERE name = '${userInput}'`;
+```
+
+## Empty Filters
+
+When no filters are provided, returns a neutral WHERE clause:
+
+```typescript
+const { sql, params } = userFilter();
+
+console.log(sql);    // "true"
+console.log(params); // {}
+
+// This is safe to use in queries:
+const query = `SELECT * FROM users WHERE ${sql}`;
+// Becomes: SELECT * FROM users WHERE true
+```
+
+## Nested Fields
+
+<Info>
+  BigQuery supports nested fields through dot notation in column names:
+  
+  ```typescript
+  interface User {
+    id: string;
+    address: {
+      city: string;
+      state: string;
+    };
+  }
+  
+  const userFilter = bigqueryFilter<User>().def({
+    city: { kind: 'eq', field: 'address.city' },
+    state: { kind: 'eq', field: 'address.state' },
+  });
+  
+  const { sql, params } = userFilter({ city: 'San Francisco' });
+  // sql: "address.city = @city"
+  ```
+</Info>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Core Types" icon="code" href="/api/core/types">
+    All available filter types
+  </Card>
+  <Card title="Custom Filters" icon="wand-magic-sparkles" href="/concepts/custom-filters">
+    Learn how to write custom SQL filters
+  </Card>
+  <Card title="BigQuery Docs" icon="book" href="https://cloud.google.com/bigquery/docs">
+    Official BigQuery documentation
+  </Card>
+  <Card title="BigQuery Node.js" icon="code" href="https://github.com/googleapis/nodejs-bigquery">
+    BigQuery Node.js client library
+  </Card>
+</CardGroup>

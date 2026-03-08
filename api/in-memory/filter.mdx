@@ -1,0 +1,362 @@
+---
+title: inMemoryFilter
+description: Filter JavaScript arrays with type-safe, composable filters
+---
+
+The `inMemoryFilter` function creates filters that work with native JavaScript array methods like `filter()`, `find()`, `some()`, and `every()`.
+
+## Function Signature
+
+```typescript
+function inMemoryFilter<Entity>(): {
+  def<TFilterDef extends InMemoryFilterDef<Entity>>(
+    filterDef: TFilterDef & ValidateFilterDef<Entity, TFilterDef>
+  ): InMemoryFilter<Entity, Simplify<InMemoryFilterDefInput<Entity, TFilterDef>>>;
+};
+```
+
+## Usage
+
+### Basic Example
+
+```typescript
+import { inMemoryFilter } from '@filter-def/in-memory';
+
+interface User {
+  id: string;
+  name: string;
+  email: string;
+  age: number;
+}
+
+// Define the filter
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  email: { kind: 'contains', caseInsensitive: true },
+  age: { kind: 'gte' },
+});
+
+// Use the filter
+const users: User[] = [...];
+
+const where = userFilter({
+  email: '@example.com',
+  age: 18,
+});
+
+const results = users.filter(where);
+```
+
+### Step-by-Step
+
+<Steps>
+  <Step title="Define your entity type">
+    ```typescript
+    interface User {
+      id: string;
+      name: string;
+      age: number;
+    }
+    ```
+  </Step>
+  
+  <Step title="Create a filter definition">
+    ```typescript
+    const userFilter = inMemoryFilter<User>().def({
+      name: { kind: 'eq' },
+      olderThan: { kind: 'gt', field: 'age' },
+    });
+    ```
+  </Step>
+  
+  <Step title="Apply the filter">
+    ```typescript
+    const where = userFilter({ name: 'John' });
+    const johns = allUsers.filter(where);
+    ```
+  </Step>
+</Steps>
+
+## Types
+
+### InMemoryFilter
+
+```typescript
+type InMemoryFilter<Entity, TFilterInput> = (
+  filterInput?: TFilterInput
+) => (entity: Entity) => boolean;
+```
+
+A higher-order function that accepts filter input and returns a predicate function.
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Object containing filter values. Keys correspond to the filter definition. Omitted filters are ignored.
+</ParamField>
+
+<ResponseField name="Returns" type="(entity: Entity) => boolean">
+  A predicate function that tests if an entity passes the filter
+</ResponseField>
+
+### InMemoryFilterInput
+
+```typescript
+type InMemoryFilterInput<TFilter> = 
+  TFilter extends InMemoryFilter<infer _TEntity, infer TFilterInput>
+    ? TFilterInput
+    : never;
+```
+
+Extracts the input type from an `InMemoryFilter`.
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({ ... });
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+```
+
+### InMemoryFilterDef
+
+```typescript
+type InMemoryFilterDef<Entity> = Record<string, InMemoryFilterField<Entity>>;
+```
+
+A record mapping filter names to filter field definitions.
+
+### InMemoryFilterField
+
+```typescript
+type InMemoryFilterField<Entity> = 
+  | CoreFilterField<Entity>
+  | InMemoryCustomFilter<Entity, any>;
+```
+
+A single filter definition - either a core filter or custom filter function.
+
+### InMemoryCustomFilter
+
+```typescript
+type InMemoryCustomFilter<Entity, Input> = (
+  entity: Entity,
+  input: Input
+) => boolean;
+```
+
+A custom filter function that accepts an entity and input, returning `true` if the entity passes.
+
+<ParamField path="entity" type="Entity" required>
+  The entity being tested
+</ParamField>
+
+<ParamField path="input" type="Input" required>
+  The filter input value
+</ParamField>
+
+<ResponseField name="Returns" type="boolean">
+  `true` if entity passes, `false` otherwise
+</ResponseField>
+
+## Examples
+
+### All Core Filter Types
+
+```typescript
+interface Product {
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  tags: string[];
+  description?: string;
+}
+
+const productFilter = inMemoryFilter<Product>().def({
+  // Equality
+  id: { kind: 'eq' },
+  
+  // Not equal
+  excludeCategory: { kind: 'neq', field: 'category' },
+  
+  // String contains
+  nameContains: { kind: 'contains', field: 'name', caseInsensitive: true },
+  
+  // Array membership
+  category: { kind: 'inArray' },
+  
+  // Null checks
+  hasDescription: { kind: 'isNotNull', field: 'description' },
+  missingDescription: { kind: 'isNull', field: 'description' },
+  
+  // Comparisons
+  minPrice: { kind: 'gte', field: 'price' },
+  maxPrice: { kind: 'lte', field: 'price' },
+  
+  // Boolean filters
+  priceRange: {
+    kind: 'and',
+    conditions: [
+      { kind: 'gte', field: 'price' },
+      { kind: 'lte', field: 'price' },
+    ],
+  },
+  
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'name' },
+      { kind: 'contains', field: 'description' },
+    ],
+  },
+});
+
+const where = productFilter({
+  category: ['electronics', 'computers'],
+  minPrice: 100,
+  maxPrice: 1000,
+  search: 'laptop',
+});
+
+const products = allProducts.filter(where);
+```
+
+### Custom Filters
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  
+  // Custom filter: age is divisible by N
+  ageDivisibleBy: (user, divisor: number) => {
+    return user.age % divisor === 0;
+  },
+  
+  // Custom filter: full-text search
+  fullTextSearch: (user, query: string) => {
+    const searchable = [user.name, user.email, user.bio].join(' ').toLowerCase();
+    return searchable.includes(query.toLowerCase());
+  },
+});
+
+const where = userFilter({
+  ageDivisibleBy: 5,
+  fullTextSearch: 'engineer',
+});
+
+const users = allUsers.filter(where);
+```
+
+### Nested Field Paths
+
+```typescript
+interface User {
+  id: string;
+  name: {
+    first: string;
+    last: string;
+  };
+  contact: {
+    email: string;
+    phone?: string;
+  };
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  // Dot notation for nested fields
+  firstName: { kind: 'eq', field: 'name.first' },
+  email: { kind: 'contains', field: 'contact.email' },
+  hasPhone: { kind: 'isNotNull', field: 'contact.phone' },
+});
+
+const where = userFilter({
+  firstName: 'John',
+  email: '@example.com',
+});
+
+const users = allUsers.filter(where);
+```
+
+### Array Methods
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  age: { kind: 'gte' },
+  status: { kind: 'eq' },
+});
+
+const where = userFilter({ age: 18, status: 'active' });
+
+// Filter: get all matches
+const adults = users.filter(where);
+
+// Find: get first match
+const firstAdult = users.find(where);
+
+// Some: test if any match
+const hasAdults = users.some(where);
+
+// Every: test if all match
+const allAdults = users.every(where);
+```
+
+### Optional Filters
+
+```typescript
+interface FilterInput {
+  name?: string;
+  age?: number;
+  status?: string;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  age: { kind: 'gte' },
+  status: { kind: 'eq' },
+});
+
+// Only applies filters that are provided
+const where1 = userFilter({ name: 'John' }); // Only filters by name
+const where2 = userFilter({ age: 18 }); // Only filters by age
+const where3 = userFilter({}); // No filters, passes all
+const where4 = userFilter(); // No filters, passes all
+```
+
+## Performance
+
+The `inMemoryFilter` function is highly optimized:
+
+<Card title="Pre-compilation" icon="bolt">
+  Filters are compiled once at definition time, not on every use. This makes repeated filtering extremely fast.
+</Card>
+
+```typescript
+// ✅ GOOD: Define filter once, use many times
+const userFilter = inMemoryFilter<User>().def({ ... });
+
+for (const input of manyInputs) {
+  const where = userFilter(input);
+  const results = users.filter(where);
+}
+
+// ❌ BAD: Redefining filter in loop
+for (const input of manyInputs) {
+  const userFilter = inMemoryFilter<User>().def({ ... });
+  const where = userFilter(input);
+  const results = users.filter(where);
+}
+```
+
+<Tip>
+  For convenience methods like `filter()`, `find()`, etc., see [makeFilterHelpers](/api/in-memory/helpers).
+</Tip>
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="Filter Helpers" icon="wrench" href="/api/in-memory/helpers">
+    Convenience methods for common operations
+  </Card>
+  <Card title="Core Types" icon="code" href="/api/core/types">
+    All available filter types
+  </Card>
+  <Card title="Custom Filters" icon="wand-magic-sparkles" href="/concepts/custom-filters">
+    Learn how to write custom filters
+  </Card>
+</CardGroup>

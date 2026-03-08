@@ -1,0 +1,392 @@
+---
+title: makeFilterHelpers
+description: Convenience wrappers for common array operations
+---
+
+The `makeFilterHelpers` utility creates a set of helper functions that wrap common array operations, making them more convenient to use with filters.
+
+## Function Signature
+
+```typescript
+function makeFilterHelpers<TEntity, TFilterInput>(
+  filter: InMemoryFilter<TEntity, TFilterInput>
+): FilterHelpers<TEntity, TFilterInput>;
+```
+
+<ParamField path="filter" type="InMemoryFilter<TEntity, TFilterInput>" required>
+  An in-memory filter created with `inMemoryFilter().def()`
+</ParamField>
+
+<ResponseField name="Returns" type="FilterHelpers<TEntity, TFilterInput>">
+  An object containing helper functions for common array operations
+</ResponseField>
+
+## FilterHelpers Interface
+
+```typescript
+interface FilterHelpers<TEntity, TFilterInput> {
+  filter: (entities: TEntity[], filterInput?: TFilterInput) => TEntity[];
+  find: (entities: TEntity[], filterInput?: TFilterInput) => TEntity | undefined;
+  findIndex: (entities: TEntity[], filterInput?: TFilterInput) => number | undefined;
+  some: (entities: TEntity[], filterInput?: TFilterInput) => boolean;
+  every: (entities: TEntity[], filterInput?: TFilterInput) => boolean;
+}
+```
+
+### filter
+
+```typescript
+filter(entities: TEntity[], filterInput?: TFilterInput): TEntity[]
+```
+
+Returns all entities that match the filter.
+
+<ParamField path="entities" type="TEntity[]" required>
+  Array of entities to filter
+</ParamField>
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Filter values to apply
+</ParamField>
+
+<ResponseField name="Returns" type="TEntity[]">
+  Array of matching entities
+</ResponseField>
+
+### find
+
+```typescript
+find(entities: TEntity[], filterInput?: TFilterInput): TEntity | undefined
+```
+
+Returns the first entity that matches the filter.
+
+<ParamField path="entities" type="TEntity[]" required>
+  Array of entities to search
+</ParamField>
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Filter values to apply
+</ParamField>
+
+<ResponseField name="Returns" type="TEntity | undefined">
+  First matching entity, or `undefined` if none found
+</ResponseField>
+
+### findIndex
+
+```typescript
+findIndex(entities: TEntity[], filterInput?: TFilterInput): number | undefined
+```
+
+Returns the index of the first entity that matches the filter.
+
+<ParamField path="entities" type="TEntity[]" required>
+  Array of entities to search
+</ParamField>
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Filter values to apply
+</ParamField>
+
+<ResponseField name="Returns" type="number | undefined">
+  Index of first matching entity, or `undefined` if none found
+</ResponseField>
+
+### some
+
+```typescript
+some(entities: TEntity[], filterInput?: TFilterInput): boolean
+```
+
+Tests whether at least one entity matches the filter.
+
+<ParamField path="entities" type="TEntity[]" required>
+  Array of entities to test
+</ParamField>
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Filter values to apply
+</ParamField>
+
+<ResponseField name="Returns" type="boolean">
+  `true` if any entity matches, `false` otherwise
+</ResponseField>
+
+### every
+
+```typescript
+every(entities: TEntity[], filterInput?: TFilterInput): boolean
+```
+
+Tests whether all entities match the filter.
+
+<ParamField path="entities" type="TEntity[]" required>
+  Array of entities to test
+</ParamField>
+
+<ParamField path="filterInput" type="TFilterInput" optional>
+  Filter values to apply
+</ParamField>
+
+<ResponseField name="Returns" type="boolean">
+  `true` if all entities match, `false` otherwise
+</ResponseField>
+
+## Usage
+
+### Basic Example
+
+```typescript
+import { inMemoryFilter, makeFilterHelpers } from '@filter-def/in-memory';
+
+interface User {
+  id: string;
+  name: string;
+  age: number;
+  status: string;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  age: { kind: 'gte' },
+  status: { kind: 'eq' },
+});
+
+const {
+  filter: filterUsers,
+  find: findUser,
+  some: someUsers,
+  every: everyUser,
+} = makeFilterHelpers(userFilter);
+
+const users: User[] = [...];
+
+// Get all adults
+const adults = filterUsers(users, { age: 18 });
+
+// Find first active user
+const activeUser = findUser(users, { status: 'active' });
+
+// Check if any users are adults
+const hasAdults = someUsers(users, { age: 18 });
+
+// Check if all users are active
+const allActive = everyUser(users, { status: 'active' });
+```
+
+### Comparison
+
+Here's how the helpers compare to using the filter directly:
+
+<Tabs>
+  <Tab title="With Helpers">
+    ```typescript
+    const { filter: filterUsers } = makeFilterHelpers(userFilter);
+    
+    const adults = filterUsers(users, { age: 18 });
+    ```
+  </Tab>
+  
+  <Tab title="Without Helpers">
+    ```typescript
+    const where = userFilter({ age: 18 });
+    const adults = users.filter(where);
+    ```
+  </Tab>
+</Tabs>
+
+Both approaches are valid. Use helpers when you prefer a more functional style, or when you want to avoid creating intermediate `where` functions.
+
+### Currying Pattern
+
+Helpers work well with partial application:
+
+```typescript
+const { filter: filterUsers, find: findUser } = makeFilterHelpers(userFilter);
+
+// Create specialized functions
+const getActiveUsers = (users: User[]) => 
+  filterUsers(users, { status: 'active' });
+
+const getAdults = (users: User[]) => 
+  filterUsers(users, { age: 18 });
+
+const findAdmin = (users: User[]) => 
+  findUser(users, { role: 'admin' });
+
+// Use them
+const activeUsers = getActiveUsers(allUsers);
+const adults = getAdults(allUsers);
+const admin = findAdmin(allUsers);
+```
+
+### Service Layer Pattern
+
+```typescript
+class UserService {
+  private users: User[] = [];
+  private helpers: FilterHelpers<User, any>;
+  
+  constructor() {
+    const userFilter = inMemoryFilter<User>().def({
+      id: { kind: 'eq' },
+      name: { kind: 'eq' },
+      age: { kind: 'gte' },
+      status: { kind: 'eq' },
+    });
+    
+    this.helpers = makeFilterHelpers(userFilter);
+  }
+  
+  findById(id: string): User | undefined {
+    return this.helpers.find(this.users, { id });
+  }
+  
+  findByName(name: string): User | undefined {
+    return this.helpers.find(this.users, { name });
+  }
+  
+  getActiveUsers(): User[] {
+    return this.helpers.filter(this.users, { status: 'active' });
+  }
+  
+  getAdults(): User[] {
+    return this.helpers.filter(this.users, { age: 18 });
+  }
+  
+  hasActiveUsers(): boolean {
+    return this.helpers.some(this.users, { status: 'active' });
+  }
+  
+  areAllActive(): boolean {
+    return this.helpers.every(this.users, { status: 'active' });
+  }
+}
+```
+
+### Multiple Filter Definitions
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+  name: { kind: 'eq' },
+  age: { kind: 'gte' },
+});
+
+const adminFilter = inMemoryFilter<User>().def({
+  role: { kind: 'eq' },
+  permissions: { kind: 'inArray' },
+});
+
+const userHelpers = makeFilterHelpers(userFilter);
+const adminHelpers = makeFilterHelpers(adminFilter);
+
+// Different filter contexts
+const adults = userHelpers.filter(users, { age: 18 });
+const superAdmins = adminHelpers.filter(users, { role: 'super_admin' });
+```
+
+## Complete Example
+
+```typescript
+import { inMemoryFilter, makeFilterHelpers } from '@filter-def/in-memory';
+
+interface Task {
+  id: string;
+  title: string;
+  description: string;
+  status: 'todo' | 'in_progress' | 'done';
+  priority: number;
+  assignee?: string;
+  tags: string[];
+  createdAt: Date;
+}
+
+const taskFilter = inMemoryFilter<Task>().def({
+  id: { kind: 'eq' },
+  status: { kind: 'eq' },
+  priority: { kind: 'gte' },
+  assignee: { kind: 'eq' },
+  hasAssignee: { kind: 'isNotNull', field: 'assignee' },
+  search: {
+    kind: 'or',
+    conditions: [
+      { kind: 'contains', field: 'title' },
+      { kind: 'contains', field: 'description' },
+    ],
+  },
+});
+
+const {
+  filter: filterTasks,
+  find: findTask,
+  some: someTasks,
+  every: everyTask,
+  findIndex: findTaskIndex,
+} = makeFilterHelpers(taskFilter);
+
+const tasks: Task[] = [...];
+
+// Get all high-priority tasks
+const urgentTasks = filterTasks(tasks, { priority: 8 });
+
+// Find a specific task
+const task = findTask(tasks, { id: 'task-123' });
+
+// Get task index
+const index = findTaskIndex(tasks, { id: 'task-123' });
+
+// Check if any tasks are in progress
+const hasInProgress = someTasks(tasks, { status: 'in_progress' });
+
+// Check if all tasks are done
+const allDone = everyTask(tasks, { status: 'done' });
+
+// Search tasks
+const searchResults = filterTasks(tasks, { search: 'bug fix' });
+
+// Get unassigned tasks
+const unassigned = filterTasks(tasks, { hasAssignee: false });
+```
+
+## When to Use
+
+<Card title="✅ Use helpers when:" icon="check">
+  - You prefer a functional programming style
+  - You want to avoid intermediate variables
+  - You're building a service layer with many filter operations
+  - You want to create specialized filter functions
+</Card>
+
+<Card title="❌ Skip helpers when:" icon="x">
+  - You only use filters in a few places
+  - You prefer the explicit `where` pattern
+  - You need more control over the filter application
+  - You want to see the intermediate predicate function
+</Card>
+
+## Performance
+
+Helpers add minimal overhead - they simply wrap the standard array methods with your filter function. There's no performance penalty for using them.
+
+```typescript
+// These are equivalent in performance:
+
+// With helper
+const results1 = filterUsers(users, { age: 18 });
+
+// Without helper
+const where = userFilter({ age: 18 });
+const results2 = users.filter(where);
+```
+
+## Related
+
+<CardGroup cols={2}>
+  <Card title="inMemoryFilter" icon="filter" href="/api/in-memory/filter">
+    Create in-memory filters
+  </Card>
+  <Card title="Core Types" icon="code" href="/api/core/types">
+    All available filter types
+  </Card>
+</CardGroup>

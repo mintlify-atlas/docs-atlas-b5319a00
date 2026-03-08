@@ -1,0 +1,619 @@
+---
+title: Best Practices
+description: Best practices for using filter-def effectively
+---
+
+## Type Safety
+
+### Always Extract Input Types
+
+Define explicit types for filter inputs to improve code maintainability and catch errors at compile time:
+
+```typescript
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+    emailContains: { kind: "contains", field: "email" },
+});
+
+// ✅ Extract the input type
+type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+
+// Use it in function signatures
+function fetchUsers(filters: UserFilterInput): User[] {
+    return users.filter(userFilter(filters));
+}
+```
+
+<Tip>
+Extracting input types provides better IDE autocomplete and prevents invalid filter values.
+</Tip>
+
+### Use Explicit Field Properties
+
+When filter names don't match entity fields, always use explicit `field` properties:
+
+```typescript
+// ❌ Avoid: Confusing filter name without explicit field
+const userFilter = inMemoryFilter<User>().def({
+    q: { kind: "contains" }, // What field does this filter?
+});
+
+// ✅ Good: Explicit field makes intent clear
+const userFilter = inMemoryFilter<User>().def({
+    searchQuery: { kind: "contains", field: "name" },
+});
+```
+
+### Validate Filter Definitions at Build Time
+
+Take advantage of TypeScript's validation to catch errors early:
+
+```typescript
+interface User {
+    name: string;
+    email: string;
+    age: number;
+}
+
+// ❌ This will cause a type error (good!)
+const userFilter = inMemoryFilter<User>().def({
+    firstName: { kind: "eq" }, // ❌ 'firstName' is not a field of User
+});
+
+// ✅ Valid filter definitions
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" }, // ✅ 'name' matches User field
+    firstName: { kind: "eq", field: "name" }, // ✅ Explicit field provided
+});
+```
+
+### Leverage Type Inference
+
+Let TypeScript infer types when the filter name matches the field name:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    // Field name matches filter name - field property is optional
+    name: { kind: "eq" },
+    email: { kind: "contains" },
+    age: { kind: "gte" },
+    
+    // Field name differs - field property required
+    minAge: { kind: "gte", field: "age" },
+    searchTerm: { kind: "contains", field: "name" },
+});
+```
+
+## Performance
+
+### Pre-Compile Filters
+
+Define filters once outside of render loops or request handlers:
+
+<CodeGroup>
+
+```typescript ✅ Good: Define Once
+// Define filter at module level
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+function searchUsers(filters: UserFilterInput) {
+    // Reuse pre-compiled filter
+    return users.filter(userFilter(filters));
+}
+```
+
+```typescript ❌ Bad: Define Repeatedly
+function searchUsers(filters: UserFilterInput) {
+    // ❌ Redefines filter on every call
+    const userFilter = inMemoryFilter<User>().def({
+        name: { kind: "eq" },
+        minAge: { kind: "gte", field: "age" },
+    });
+    
+    return users.filter(userFilter(filters));
+}
+```
+
+</CodeGroup>
+
+<Warning>
+Defining filters inside functions causes unnecessary recompilation on every invocation.
+</Warning>
+
+### Avoid Unnecessary Filter Fields
+
+Only define filters you actually use:
+
+```typescript
+// ❌ Defining too many unused filters
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    email: { kind: "eq" },
+    age: { kind: "eq" },
+    phone: { kind: "eq" },
+    address: { kind: "eq" },
+    // ... many more fields you never use
+});
+
+// ✅ Define only what you need
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+```
+
+### Optimize Boolean Filters
+
+When using `or` filters with many conditions, consider whether a different approach might be more efficient:
+
+```typescript
+// For searching across multiple fields
+const userFilter = inMemoryFilter<User>().def({
+    searchTerm: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "email" },
+            { kind: "contains", field: "phone" },
+        ],
+    },
+});
+
+// Or use a custom filter for complex logic
+const userFilter = inMemoryFilter<User>().def({
+    searchTerm: (user, term: string) => {
+        const lowerTerm = term.toLowerCase();
+        return (
+            user.name.toLowerCase().includes(lowerTerm) ||
+            user.email.toLowerCase().includes(lowerTerm) ||
+            user.phone?.toLowerCase().includes(lowerTerm)
+        );
+    },
+});
+```
+
+### Use Appropriate Adapters
+
+Choose the right adapter for your data source:
+
+<CardGroup cols={2}>
+
+<Card title="In-Memory" icon="memory">
+**Use for:**
+- Small datasets (< 10,000 items)
+- Client-side filtering
+- Already-loaded data
+
+**Avoid for:**
+- Large datasets requiring pagination
+- Data that should be filtered at the database level
+</Card>
+
+<Card title="SQL (Drizzle)" icon="database">
+**Use for:**
+- Large datasets
+- Server-side filtering
+- When you need database indexes
+
+**Avoid for:**
+- In-memory arrays
+- Client-side filtering
+</Card>
+
+</CardGroup>
+
+## Error Handling
+
+### Handle Empty Filter Inputs
+
+All adapters handle empty filter inputs gracefully:
+
+```typescript
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+// These all return truthy results (no filtering)
+users.filter(userFilter()); // undefined input
+users.filter(userFilter({})); // empty object
+
+// Only specified filters are applied
+users.filter(userFilter({ name: "John" })); // Only name filter
+```
+
+### Validate User Input
+
+When accepting filter values from user input, validate them first:
+
+```typescript
+import { z } from "zod";
+
+const UserFilterInputSchema = z.object({
+    name: z.string().optional(),
+    minAge: z.number().min(0).max(150).optional(),
+    emailContains: z.string().email().optional(),
+});
+
+function searchUsers(rawInput: unknown) {
+    // Validate user input
+    const validatedInput = UserFilterInputSchema.parse(rawInput);
+    
+    // Safe to use validated input
+    return users.filter(userFilter(validatedInput));
+}
+```
+
+### Handle Missing Fields Gracefully
+
+When working with optional fields, ensure your filters handle undefined values:
+
+```typescript
+interface User {
+    name: string;
+    email: string;
+    phone?: string; // Optional field
+}
+
+const userFilter = inMemoryFilter<User>().def({
+    phoneContains: { kind: "contains", field: "phone" },
+});
+
+// The filter will safely handle undefined phone values
+const results = users.filter(
+    userFilter({ phoneContains: "555" })
+);
+```
+
+<Note>
+filter-def automatically handles undefined/null field values in all adapters.
+</Note>
+
+## Code Organization
+
+### Centralize Filter Definitions
+
+Define all filters for an entity in one place:
+
+```typescript filters/user-filters.ts
+import { inMemoryFilter } from "@filter-def/in-memory";
+import type { InMemoryFilterInput } from "@filter-def/in-memory";
+import type { User } from "@/types/user";
+
+export const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    nameContains: { kind: "contains", field: "name" },
+    email: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+    maxAge: { kind: "lte", field: "age" },
+    isActive: { kind: "eq" },
+});
+
+export type UserFilterInput = InMemoryFilterInput<typeof userFilter>;
+```
+
+Then import and use throughout your application:
+
+```typescript services/user-service.ts
+import { userFilter } from "@/filters/user-filters";
+import type { UserFilterInput } from "@/filters/user-filters";
+
+export function findUsers(filters: UserFilterInput): User[] {
+    return users.filter(userFilter(filters));
+}
+```
+
+### Create Filter Presets
+
+Define common filter combinations as presets:
+
+```typescript filters/user-filters.ts
+import type { UserFilterInput } from "./user-filters";
+
+export const USER_FILTER_PRESETS = {
+    activeAdults: {
+        isActive: true,
+        minAge: 18,
+    } satisfies UserFilterInput,
+    
+    premiumUsers: {
+        subscriptionType: "premium",
+        isActive: true,
+    } satisfies UserFilterInput,
+    
+    recentSignups: {
+        minCreatedAt: Date.now() - 7 * 24 * 60 * 60 * 1000, // Last 7 days
+    } satisfies UserFilterInput,
+};
+
+// Usage
+const activeAdults = users.filter(
+    userFilter(USER_FILTER_PRESETS.activeAdults)
+);
+```
+
+### Compose Filters Dynamically
+
+Build filter inputs conditionally based on application logic:
+
+```typescript
+import type { UserFilterInput } from "@/filters/user-filters";
+
+function buildSearchFilters(
+    searchTerm?: string,
+    ageRange?: { min?: number; max?: number },
+    activeOnly?: boolean
+): UserFilterInput {
+    const filters: UserFilterInput = {};
+    
+    if (searchTerm) {
+        filters.nameContains = searchTerm;
+    }
+    
+    if (ageRange?.min !== undefined) {
+        filters.minAge = ageRange.min;
+    }
+    
+    if (ageRange?.max !== undefined) {
+        filters.maxAge = ageRange.max;
+    }
+    
+    if (activeOnly) {
+        filters.isActive = true;
+    }
+    
+    return filters;
+}
+
+// Usage
+const filters = buildSearchFilters("John", { min: 18, max: 65 }, true);
+const results = users.filter(userFilter(filters));
+```
+
+## Testing
+
+### Test Filter Definitions
+
+Write tests for your filter definitions:
+
+```typescript user-filters.spec.ts
+import { describe, expect, it } from "vitest";
+import { userFilter } from "./user-filters";
+
+const mockUsers: User[] = [
+    { id: 1, name: "John Doe", email: "john@example.com", age: 30 },
+    { id: 2, name: "Jane Doe", email: "jane@example.com", age: 25 },
+    { id: 3, name: "Bob Smith", email: "bob@example.com", age: 40 },
+];
+
+describe("userFilter", () => {
+    it("should filter by name", () => {
+        const results = mockUsers.filter(
+            userFilter({ name: "John Doe" })
+        );
+        
+        expect(results).toHaveLength(1);
+        expect(results[0].name).toBe("John Doe");
+    });
+    
+    it("should filter by age range", () => {
+        const results = mockUsers.filter(
+            userFilter({ minAge: 25, maxAge: 35 })
+        );
+        
+        expect(results).toHaveLength(2);
+        expect(results.map(u => u.name)).toEqual(["John Doe", "Jane Doe"]);
+    });
+    
+    it("should combine multiple filters", () => {
+        const results = mockUsers.filter(
+            userFilter({
+                emailContains: "example",
+                minAge: 30,
+            })
+        );
+        
+        expect(results).toHaveLength(2);
+    });
+});
+```
+
+### Mock Filter Inputs
+
+Create test fixtures for filter inputs:
+
+```typescript __fixtures__/user-filters.ts
+import type { UserFilterInput } from "@/filters/user-filters";
+
+export const TEST_USER_FILTERS = {
+    johnDoe: {
+        name: "John Doe",
+    } satisfies UserFilterInput,
+    
+    adults: {
+        minAge: 18,
+    } satisfies UserFilterInput,
+    
+    exampleEmails: {
+        emailContains: "example.com",
+    } satisfies UserFilterInput,
+};
+```
+
+### Test Type Safety
+
+Use `expectTypeOf` to test type inference:
+
+```typescript user-filters.spec.ts
+import { expectTypeOf } from "vitest";
+import { userFilter } from "./user-filters";
+import type { UserFilterInput } from "./user-filters";
+
+it("should infer correct input type", () => {
+    expectTypeOf<UserFilterInput>().toMatchTypeOf<{
+        name?: string;
+        nameContains?: string;
+        email?: string;
+        minAge?: number;
+        maxAge?: number;
+        isActive?: boolean;
+    }>();
+});
+```
+
+## Debugging
+
+### Log Filter Compilation
+
+When debugging, log the compiled filter result:
+
+<CodeGroup>
+
+```typescript In-Memory
+const predicate = userFilter({ name: "John" });
+console.log("Filter predicate:", predicate.toString());
+
+const results = users.filter(predicate);
+console.log("Filtered results:", results);
+```
+
+```typescript Drizzle
+const where = userFilter({ name: "John" });
+console.log("SQL WHERE clause:", where?.toSQL());
+
+const results = await db.select().from(usersTable).where(where);
+```
+
+```typescript BigQuery
+const where = userFilter({ name: "John" });
+console.log("BigQuery WHERE:", where.sql);
+console.log("BigQuery params:", where.params);
+
+const [rows] = await bigquery.query({
+    query: `SELECT * FROM users WHERE ${where.sql}`,
+    params: where.params,
+});
+```
+
+</CodeGroup>
+
+### Verify Filter Logic
+
+Test filters with known data to verify behavior:
+
+```typescript
+const testData = [
+    { id: 1, name: "John", age: 30 },
+    { id: 2, name: "Jane", age: 25 },
+];
+
+const filter = userFilter({ minAge: 26 });
+const results = testData.filter(filter);
+
+console.log("Expected: John (30)");
+console.log("Actual:", results);
+```
+
+## Security
+
+### Sanitize User Input
+
+Always validate and sanitize filter values from user input:
+
+```typescript
+import { z } from "zod";
+
+// Define strict schema for user-provided filters
+const SearchFiltersSchema = z.object({
+    name: z.string().max(100).optional(),
+    minAge: z.number().int().min(0).max(150).optional(),
+    email: z.string().email().max(255).optional(),
+});
+
+function searchUsers(untrustedInput: unknown) {
+    try {
+        const validFilters = SearchFiltersSchema.parse(untrustedInput);
+        return users.filter(userFilter(validFilters));
+    } catch (error) {
+        console.error("Invalid filter input:", error);
+        return [];
+    }
+}
+```
+
+### Prevent SQL Injection (Drizzle/BigQuery)
+
+All official adapters use parameterized queries, but be careful with custom filters:
+
+<CodeGroup>
+
+```typescript ✅ Safe: Parameterized
+const userFilter = drizzleFilter(usersTable).def({
+    // ✅ Safe: Uses Drizzle's parameterized queries
+    name: { kind: "eq" },
+    
+    // ✅ Safe: Custom filter with proper parameterization
+    customSearch: (term: string) => sql`name ILIKE ${'%' + term + '%'}`,
+});
+```
+
+```typescript ❌ Dangerous: String Concatenation
+const userFilter = drizzleFilter(usersTable).def({
+    // ❌ NEVER do this: SQL injection risk!
+    dangerousSearch: (term: string) => 
+        sql.raw(`name ILIKE '%${term}%'`),
+});
+```
+
+</CodeGroup>
+
+### Limit Filter Complexity
+
+Prevent resource exhaustion by limiting filter complexity:
+
+```typescript
+function validateFilterComplexity(filters: UserFilterInput): boolean {
+    const filterCount = Object.keys(filters).length;
+    
+    if (filterCount > 10) {
+        throw new Error("Too many filters specified (max: 10)");
+    }
+    
+    return true;
+}
+
+function searchUsers(filters: UserFilterInput) {
+    validateFilterComplexity(filters);
+    return users.filter(userFilter(filters));
+}
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="API Reference" icon="book" href="/api/core/types">
+Explore the complete API documentation
+</Card>
+
+<Card title="Core Concepts" icon="lightbulb" href="/concepts/filter-definitions">
+Learn about filter definitions and types
+</Card>
+
+<Card title="Building Adapters" icon="wrench" href="/guides/building-adapters">
+Learn how to create custom adapters
+</Card>
+
+<Card title="Migration Guide" icon="arrow-right" href="/guides/migration-v2">
+Upgrade from v1 to v2
+</Card>
+
+</CardGroup>

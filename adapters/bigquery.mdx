@@ -1,0 +1,506 @@
+---
+title: BigQuery Adapter
+description: Generate parameterized SQL for Google BigQuery
+---
+
+The BigQuery adapter transforms filter definitions into parameterized SQL that works with the `@google-cloud/bigquery` Node.js client. It generates safe, type-checked queries with `@paramName` placeholders.
+
+## Installation
+
+<Steps>
+  <Step title="Install the packages">
+    ```bash
+    npm install @filter-def/bigquery @google-cloud/bigquery
+    # or
+    pnpm add @filter-def/bigquery @google-cloud/bigquery
+    ```
+    
+    <Note>
+    `@google-cloud/bigquery` is a peer dependency and must be installed separately.
+    </Note>
+  </Step>
+</Steps>
+
+## Basic Usage
+
+Define your filters and use them with BigQuery queries:
+
+```typescript
+import { bigqueryFilter } from "@filter-def/bigquery";
+import type { BigQueryFilterInput } from "@filter-def/bigquery";
+import { BigQuery } from "@google-cloud/bigquery";
+
+interface User {
+    id: number;
+    name: string;
+    email: string;
+    age: number;
+    isActive: boolean;
+}
+
+// Create a filter definition
+const userFilter = bigqueryFilter<User>().def({
+    name: { kind: "eq" },
+    emailContains: { kind: "contains", field: "email" },
+    minAge: { kind: "gte", field: "age" },
+    isActive: { kind: "eq" },
+});
+
+// Generate SQL and params
+const where = userFilter({
+    name: "John",
+    emailContains: "@example.com",
+    minAge: 18,
+    isActive: true,
+});
+// where = {
+//   sql: 'name = @name AND email LIKE @emailContains AND age >= @minAge AND isActive = @isActive',
+//   params: { name: 'John', emailContains: '%@example.com%', minAge: 18, isActive: true }
+// }
+
+// Use with BigQuery
+const bigquery = new BigQuery();
+const [rows] = await bigquery.query({
+    query: `SELECT * FROM \`myproject.dataset.users\` WHERE ${where.sql}`,
+    params: where.params,
+});
+```
+
+## Filter Output
+
+The filter function always returns `{ sql: string, params: Record<string, unknown> }`:
+
+```typescript
+const where = userFilter({ name: "John" });
+// { sql: 'name = @name', params: { name: 'John' } }
+
+const empty = userFilter({});
+// { sql: 'true', params: {} }
+
+const noInput = userFilter();
+// { sql: 'true', params: {} }
+```
+
+<Note>
+Empty filters return `{ sql: "true", params: {} }` which matches all rows. This simplifies query composition by eliminating conditional logic.
+</Note>
+
+## Filter Types
+
+The BigQuery adapter supports all standard filter kinds:
+
+| Kind | SQL Output | Description | Example |
+| --- | --- | --- | --- |
+| `eq` | `column = @param` | Exact equality | `{ name: { kind: "eq" } }` |
+| `neq` | `column != @param` | Not equal | `{ status: { kind: "neq" } }` |
+| `contains` | `column LIKE @param` | String contains | `{ email: { kind: "contains" } }` |
+| `inArray` | `column IN UNNEST(@param)` | Value in array | `{ status: { kind: "inArray" } }` |
+| `gt` | `column > @param` | Greater than | `{ age: { kind: "gt" } }` |
+| `gte` | `column >= @param` | Greater than or equal | `{ price: { kind: "gte" } }` |
+| `lt` | `column < @param` | Less than | `{ age: { kind: "lt" } }` |
+| `lte` | `column <= @param` | Less than or equal | `{ price: { kind: "lte" } }` |
+| `isNull` | `column IS NULL` | Check if null (no param) | `{ deletedAt: { kind: "isNull" } }` |
+| `isNotNull` | `column IS NOT NULL` | Check not null (no param) | `{ email: { kind: "isNotNull" } }` |
+
+### Case-Insensitive String Matching
+
+Use `caseInsensitive: true` to use `LOWER()` for case-insensitive matching:
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+    nameSearch: {
+        kind: "contains",
+        field: "name",
+        caseInsensitive: true, // Uses LOWER(column) LIKE LOWER(@param)
+    },
+});
+
+const where = userFilter({ nameSearch: "JOHN" });
+// { sql: 'LOWER(name) LIKE LOWER(@nameSearch)', params: { nameSearch: '%JOHN%' } }
+```
+
+## Nested Fields (STRUCT)
+
+Use dot-separated paths to filter on nested STRUCT fields in BigQuery:
+
+```typescript
+interface UserWithAddress {
+    name: { first: string; last: string };
+    address: { city: string; geo: { lat: number; lng: number } };
+}
+
+const userFilter = bigqueryFilter<UserWithAddress>().def({
+    firstName: { kind: "eq", field: "name.first" },
+    city: { kind: "eq", field: "address.city" },
+    lat: { kind: "eq", field: "address.geo.lat" },
+});
+
+const where = userFilter({ firstName: "Bob", lat: 25 });
+// {
+//   sql: 'name.first = @name_first AND address.geo.lat = @address_geo_lat',
+//   params: { name_first: 'Bob', address_geo_lat: 25 }
+// }
+```
+
+<Note>
+Dots in field paths are used directly as column references in SQL. Parameter names replace dots with underscores to comply with BigQuery naming rules.
+</Note>
+
+## Boolean Filters (AND/OR)
+
+Combine multiple conditions with logical operators:
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+    // OR: match any condition
+    searchTerm: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "email" },
+        ],
+    },
+
+    // AND: match all conditions
+    ageRange: {
+        kind: "and",
+        conditions: [
+            { kind: "gte", field: "age" },
+            { kind: "lte", field: "age" },
+        ],
+    },
+});
+
+const where = userFilter({
+    searchTerm: "john",
+    ageRange: 30,
+});
+// {
+//   sql: '(name LIKE @searchTerm_0 OR email LIKE @searchTerm_1) AND (age >= @ageRange_0 AND age <= @ageRange_1)',
+//   params: { searchTerm_0: '%john%', searchTerm_1: '%john%', ageRange_0: 30, ageRange_1: 30 }
+// }
+```
+
+<Warning>
+All conditions in boolean filters must have explicit `field` properties.
+</Warning>
+
+## Custom Filters
+
+Define custom SQL expressions for complex filtering logic:
+
+```typescript
+import type { BigQueryFilterResult } from "@filter-def/bigquery";
+
+interface Event {
+    id: number;
+    name: string;
+    userId: number;
+    timestamp: string;
+    metadata: Record<string, unknown>;
+}
+
+const eventFilter = bigqueryFilter<Event>().def({
+    // Standard filters
+    id: { kind: "eq" },
+    userId: { kind: "eq" },
+    nameContains: { kind: "contains", field: "name" },
+
+    // Custom filter: Modulo operation
+    idDivisibleBy: (divisor: number): BigQueryFilterResult => ({
+        sql: "MOD(id, @divisor) = 0",
+        params: { divisor },
+    }),
+
+    // Custom filter: Return 'true' when no filter needed
+    optionalStatus: (status: string | "all"): BigQueryFilterResult =>
+        status === "all"
+            ? { sql: "true", params: {} }
+            : { sql: "status = @status", params: { status } },
+
+    // Custom filter: Date filtering
+    createdAfter: (date: Date): BigQueryFilterResult => ({
+        sql: "timestamp > @createdAfter",
+        params: { createdAfter: date.toISOString() },
+    }),
+
+    // Custom filter: Date range
+    createdBetween: (range: { start: Date; end: Date }): BigQueryFilterResult => ({
+        sql: "timestamp BETWEEN @start AND @end",
+        params: {
+            start: range.start.toISOString(),
+            end: range.end.toISOString(),
+        },
+    }),
+
+    // Custom filter: JSON field extraction
+    hasMetadataKey: (key: string): BigQueryFilterResult => ({
+        sql: `JSON_EXTRACT(metadata, '$.${key}') IS NOT NULL`,
+        params: {},
+    }),
+
+    // Custom filter: Array length check
+    hasMinEvents: (minCount: number): BigQueryFilterResult => ({
+        sql: "(SELECT COUNT(*) FROM UNNEST(events)) >= @minCount",
+        params: { minCount },
+    }),
+});
+
+// Usage
+const where = eventFilter({
+    userId: 123,
+    createdAfter: new Date("2024-01-01"),
+    idDivisibleBy: 10,
+});
+
+const [rows] = await bigquery.query({
+    query: `SELECT * FROM \`myproject.dataset.events\` WHERE ${where.sql}`,
+    params: where.params,
+});
+```
+
+## Complete Example
+
+Here's a real-world product analytics implementation:
+
+```typescript
+import { bigqueryFilter } from "@filter-def/bigquery";
+import type { BigQueryFilterInput } from "@filter-def/bigquery";
+import { BigQuery } from "@google-cloud/bigquery";
+
+// Entity type
+interface Product {
+    id: number;
+    name: string;
+    description: string | null;
+    price: number;
+    category: string;
+    inStock: boolean;
+    createdAt: string;
+}
+
+// Filter definition
+const productFilter = bigqueryFilter<Product>().def({
+    // Inferred fields
+    name: { kind: "eq" },
+    category: { kind: "eq" },
+    inStock: { kind: "eq" },
+
+    // Explicit fields
+    nameContains: {
+        kind: "contains",
+        field: "name",
+        caseInsensitive: true,
+    },
+    minPrice: { kind: "gte", field: "price" },
+    maxPrice: { kind: "lte", field: "price" },
+    inCategories: { kind: "inArray", field: "category" },
+
+    // Boolean filter for search
+    search: {
+        kind: "or",
+        conditions: [
+            { kind: "contains", field: "name" },
+            { kind: "contains", field: "description" },
+        ],
+    },
+});
+
+type ProductFilterInput = BigQueryFilterInput<typeof productFilter>;
+
+// Usage
+const bigquery = new BigQuery();
+
+async function searchProducts(
+    input: ProductFilterInput
+): Promise<Product[]> {
+    const where = productFilter(input);
+
+    // Empty filters return { sql: 'true', params: {} }, which matches all rows
+    const [rows] = await bigquery.query({
+        query: `SELECT * FROM \`myproject.dataset.products\` WHERE ${where.sql}`,
+        params: where.params,
+    });
+    return rows as Product[];
+}
+
+// Example queries
+const electronics = await searchProducts({
+    category: "electronics",
+    inStock: true,
+    maxPrice: 500,
+});
+
+const searchResults = await searchProducts({
+    search: "laptop",
+    minPrice: 200,
+    maxPrice: 1000,
+});
+```
+
+## Type Utilities
+
+### Extract Filter Input Type
+
+Use `BigQueryFilterInput` to extract the input type:
+
+```typescript
+import type { BigQueryFilterInput } from "@filter-def/bigquery";
+
+const userFilter = bigqueryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+type UserFilterInput = BigQueryFilterInput<typeof userFilter>;
+// { name?: string; minAge?: number }
+
+async function searchUsers(filters: UserFilterInput) {
+    const where = userFilter(filters);
+    const [rows] = await bigquery.query({
+        query: `SELECT * FROM \`users\` WHERE ${where.sql}`,
+        params: where.params,
+    });
+    return rows;
+}
+```
+
+### Filter Result Type
+
+Use `BigQueryFilterResult` to type the filter output:
+
+```typescript
+import type { BigQueryFilterResult } from "@filter-def/bigquery";
+
+// { sql: string; params: Record<string, unknown> }
+const where: BigQueryFilterResult = userFilter({ name: "John" });
+```
+
+### Custom Filter Type
+
+Use `BigQueryCustomFilter` to type custom filter functions:
+
+```typescript
+import type { BigQueryCustomFilter } from "@filter-def/bigquery";
+
+type DivisibleByFilter = BigQueryCustomFilter<number>;
+// (input: number) => BigQueryFilterResult
+
+const idDivisibleBy: DivisibleByFilter = (divisor) => ({
+    sql: "MOD(id, @divisor) = 0",
+    params: { divisor },
+});
+```
+
+## BigQuery-Specific Features
+
+### Array Parameters with UNNEST
+
+BigQuery uses `UNNEST()` for array parameters in `IN` clauses:
+
+```typescript
+const userFilter = bigqueryFilter<User>().def({
+    ageIn: { kind: "inArray", field: "age" },
+});
+
+const where = userFilter({ ageIn: [25, 30, 35] });
+// { sql: 'age IN UNNEST(@ageIn)', params: { ageIn: [25, 30, 35] } }
+```
+
+### Timestamp Handling
+
+BigQuery expects timestamps in ISO format. Use custom filters for date handling:
+
+```typescript
+const eventFilter = bigqueryFilter<Event>().def({
+    after: (date: Date) => ({
+        sql: "timestamp > @after",
+        params: { after: date.toISOString() },
+    }),
+    
+    before: (date: Date) => ({
+        sql: "timestamp < @before",
+        params: { before: date.toISOString() },
+    }),
+});
+```
+
+### NULL Handling
+
+`isNull` and `isNotNull` filters don't use parameters:
+
+```typescript
+const where = userFilter({ phoneIsNull: true });
+// { sql: 'phone IS NULL', params: {} }
+```
+
+### Parameter Naming
+
+Parameter names are sanitized by replacing dots with underscores:
+
+```typescript
+const filter = bigqueryFilter<User>().def({
+    firstName: { kind: "eq", field: "name.first" },
+});
+
+const where = filter({ firstName: "John" });
+// { sql: 'name.first = @name_first', params: { name_first: 'John' } }
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Always Use Parameters" icon="shield-check">
+    Never concatenate user input directly into SQL. Always use the `params` object for safe parameterization.
+  </Card>
+  <Card title="Handle Empty Filters" icon="circle-check">
+    Empty filters return `{ sql: "true", params: {} }` which matches all rows. No conditional logic needed.
+  </Card>
+  <Card title="Use Custom Filters" icon="code">
+    Leverage custom filters for complex BigQuery functions like JSON extraction, UNNEST, and window functions.
+  </Card>
+  <Card title="Type Your Entities" icon="brackets-curly">
+    Define TypeScript interfaces for your BigQuery tables to get full type safety.
+  </Card>
+</CardGroup>
+
+## Limitations
+
+<Warning>
+**SQL Injection Protection**
+
+When using custom filters, always use parameterized queries. Never concatenate user input directly into SQL strings.
+
+```typescript
+// ✅ Safe: Uses parameterization
+const filter = bigqueryFilter<User>().def({
+    custom: (value: string) => ({
+        sql: "column = @value",
+        params: { value },
+    }),
+});
+
+// ❌ Unsafe: SQL injection risk
+const filter = bigqueryFilter<User>().def({
+    custom: (value: string) => ({
+        sql: `column = '${value}'`,
+        params: {},
+    }),
+});
+```
+</Warning>
+
+<Note>
+**Performance Considerations**
+
+- Use `LIMIT` clauses to control result set size
+- Add appropriate indexes on filtered columns
+- Consider partitioning large tables by frequently filtered date columns
+- Use `UNNEST` judiciously as it can impact query performance
+</Note>
+
+## Related Packages
+
+- [`@filter-def/core`](/api/core/types) - Core types and utilities
+- [`@filter-def/in-memory`](/adapters/in-memory) - In-memory filtering
+- [`@filter-def/drizzle`](/adapters/drizzle) - Drizzle ORM adapter

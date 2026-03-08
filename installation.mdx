@@ -1,0 +1,358 @@
+---
+title: Installation
+description: Install filter-def packages for your project
+---
+
+## Choose Your Adapter
+
+filter-def is split into multiple packages. Install only the adapters you need for your project:
+
+<CardGroup cols={2}>
+
+<Card title="@filter-def/in-memory" icon="memory">
+  For filtering JavaScript arrays with native methods
+</Card>
+
+<Card title="@filter-def/drizzle" icon="database">
+  For generating SQL WHERE clauses with Drizzle ORM
+</Card>
+
+<Card title="@filter-def/bigquery" icon="cloud">
+  For creating parameterized BigQuery SQL queries
+</Card>
+
+<Card title="@filter-def/core" icon="cube">
+  Core types only (usually not needed directly)
+</Card>
+
+</CardGroup>
+
+## Installation Commands
+
+### In-Memory Filtering
+
+For filtering arrays in JavaScript/TypeScript applications:
+
+<CodeGroup>
+
+```bash npm
+npm install @filter-def/in-memory
+```
+
+```bash yarn
+yarn add @filter-def/in-memory
+```
+
+```bash pnpm
+pnpm add @filter-def/in-memory
+```
+
+</CodeGroup>
+
+<Note>
+`@filter-def/in-memory` has zero runtime dependencies except for `@filter-def/core` (bundled automatically).
+</Note>
+
+### Drizzle ORM Adapter
+
+For SQL databases using Drizzle ORM:
+
+<CodeGroup>
+
+```bash npm
+npm install @filter-def/drizzle drizzle-orm
+```
+
+```bash yarn
+yarn add @filter-def/drizzle drizzle-orm
+```
+
+```bash pnpm
+pnpm add @filter-def/drizzle drizzle-orm
+```
+
+</CodeGroup>
+
+<Note>
+Requires `drizzle-orm@>=0.30.0` as a peer dependency. You'll also need a database driver (e.g., `pg` for PostgreSQL, `better-sqlite3` for SQLite).
+</Note>
+
+### BigQuery Adapter
+
+For Google BigQuery parameterized SQL queries:
+
+<CodeGroup>
+
+```bash npm
+npm install @filter-def/bigquery @google-cloud/bigquery
+```
+
+```bash yarn
+yarn add @filter-def/bigquery @google-cloud/bigquery
+```
+
+```bash pnpm
+pnpm add @filter-def/bigquery @google-cloud/bigquery
+```
+
+</CodeGroup>
+
+<Note>
+`@google-cloud/bigquery@>=7.0.0` is an optional peer dependency. The adapter can generate SQL without it, but you'll need it to execute queries.
+</Note>
+
+### Core Package (Optional)
+
+The core package contains TypeScript types and utilities. It's automatically included when you install any adapter, but you can install it directly if you're building a custom adapter:
+
+<CodeGroup>
+
+```bash npm
+npm install @filter-def/core
+```
+
+```bash yarn
+yarn add @filter-def/core
+```
+
+```bash pnpm
+pnpm add @filter-def/core
+```
+
+</CodeGroup>
+
+## Package Versions
+
+All packages use semantic versioning. Check npm for the latest versions:
+
+<CardGroup cols={2}>
+
+<Card title="@filter-def/core" icon="npm">
+  [![npm](https://img.shields.io/npm/v/@filter-def/core)](https://www.npmjs.com/package/@filter-def/core)
+</Card>
+
+<Card title="@filter-def/in-memory" icon="npm">
+  [![npm](https://img.shields.io/npm/v/@filter-def/in-memory)](https://www.npmjs.com/package/@filter-def/in-memory)
+</Card>
+
+<Card title="@filter-def/drizzle" icon="npm">
+  [![npm](https://img.shields.io/npm/v/@filter-def/drizzle)](https://www.npmjs.com/package/@filter-def/drizzle)
+</Card>
+
+<Card title="@filter-def/bigquery" icon="npm">
+  [![npm](https://img.shields.io/npm/v/@filter-def/bigquery)](https://www.npmjs.com/package/@filter-def/bigquery)
+</Card>
+
+</CardGroup>
+
+## TypeScript Configuration
+
+filter-def requires TypeScript 5.0 or later with strict mode enabled. Add these settings to your `tsconfig.json`:
+
+```json tsconfig.json
+{
+  "compilerOptions": {
+    "strict": true,
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true
+  }
+}
+```
+
+<Tip>
+The library is built with ES modules. If you're using CommonJS, the packages provide both ESM and CJS builds automatically.
+</Tip>
+
+## Installing Multiple Adapters
+
+You can install multiple adapters in the same project. This is useful for:
+
+- Using different backends for different features
+- Testing in-memory before deploying to a database
+- Supporting multiple data sources (e.g., PostgreSQL + BigQuery)
+
+<CodeGroup>
+
+```bash npm
+npm install @filter-def/in-memory @filter-def/drizzle drizzle-orm
+```
+
+```bash yarn
+yarn add @filter-def/in-memory @filter-def/drizzle drizzle-orm
+```
+
+```bash pnpm
+pnpm add @filter-def/in-memory @filter-def/drizzle drizzle-orm
+```
+
+</CodeGroup>
+
+## Verify Installation
+
+Test your installation with a simple example:
+
+```typescript index.ts
+import { inMemoryFilter } from "@filter-def/in-memory";
+
+interface User {
+    name: string;
+    age: number;
+}
+
+const userFilter = inMemoryFilter<User>().def({
+    name: { kind: "eq" },
+    minAge: { kind: "gte", field: "age" },
+});
+
+const users: User[] = [
+    { name: "Alice", age: 30 },
+    { name: "Bob", age: 25 },
+    { name: "Charlie", age: 35 },
+];
+
+const results = users.filter(
+    userFilter({ minAge: 30 })
+);
+
+console.log(results);
+// Output: [{ name: "Alice", age: 30 }, { name: "Charlie", age: 35 }]
+```
+
+Run the file:
+
+<CodeGroup>
+
+```bash tsx
+npx tsx index.ts
+```
+
+```bash ts-node
+npx ts-node index.ts
+```
+
+```bash bun
+bun run index.ts
+```
+
+</CodeGroup>
+
+## Peer Dependencies
+
+Each adapter has specific peer dependency requirements:
+
+<AccordionGroup>
+
+<Accordion title="@filter-def/in-memory">
+  **No peer dependencies**
+
+  Works out of the box with no additional packages required.
+</Accordion>
+
+<Accordion title="@filter-def/drizzle">
+  **Required:**
+  - `drizzle-orm@>=0.30.0`
+
+  **Also needed (depending on your database):**
+  - PostgreSQL: `pg` or `postgres`
+  - MySQL: `mysql2`
+  - SQLite: `better-sqlite3`
+
+  Example for PostgreSQL:
+  ```bash
+  npm install @filter-def/drizzle drizzle-orm pg
+  npm install -D @types/pg
+  ```
+</Accordion>
+
+<Accordion title="@filter-def/bigquery">
+  **Optional:**
+  - `@google-cloud/bigquery@>=7.0.0`
+
+  The adapter generates SQL without BigQuery installed, but you'll need it to execute queries:
+  ```bash
+  npm install @filter-def/bigquery @google-cloud/bigquery
+  ```
+</Accordion>
+
+</AccordionGroup>
+
+## Troubleshooting
+
+<AccordionGroup>
+
+<Accordion title="Type errors with TypeScript">
+  Ensure you're using TypeScript 5.0+ with strict mode:
+
+  ```json tsconfig.json
+  {
+    "compilerOptions": {
+      "strict": true
+    }
+  }
+  ```
+
+  If you see errors about missing types, install the corresponding `@types` packages:
+  ```bash
+  npm install -D @types/node
+  ```
+</Accordion>
+
+<Accordion title="Module not found errors">
+  If you see "Cannot find module" errors:
+
+  1. Check that you installed the package:
+     ```bash
+     npm list @filter-def/in-memory
+     ```
+
+  2. Verify your `moduleResolution` setting in `tsconfig.json`:
+     ```json
+     {
+       "compilerOptions": {
+         "moduleResolution": "bundler" // or "node16"
+       }
+     }
+     ```
+
+  3. Clear your package manager cache:
+     ```bash
+     npm cache clean --force
+     rm -rf node_modules package-lock.json
+     npm install
+     ```
+</Accordion>
+
+<Accordion title="Peer dependency warnings">
+  Peer dependency warnings indicate missing or incompatible versions of required packages.
+
+  For Drizzle:
+  ```bash
+  npm install drizzle-orm@latest
+  ```
+
+  For BigQuery:
+  ```bash
+  npm install @google-cloud/bigquery@latest
+  ```
+
+  If you're not using a particular adapter, you can safely ignore its peer dependency warnings.
+</Accordion>
+
+</AccordionGroup>
+
+## Next Steps
+
+<CardGroup cols={2}>
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Build your first filter in 5 minutes
+</Card>
+
+<Card title="API Reference" icon="book" href="/api/core/types">
+  Explore all available filter types
+</Card>
+
+</CardGroup>
