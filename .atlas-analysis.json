@@ -1,0 +1,100 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "filter-def",
+  "projectDescription": "Type-safe data filters for TypeScript with multi-backend support",
+  "theme": "palm",
+  "primaryColor": "#848c8e",
+  "lightColor": "#11161e",
+  "darkColor": "#cfd0d2",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Getting Started",
+            "pages": ["introduction", "installation", "quickstart"]
+          },
+          {
+            "group": "Core Concepts",
+            "pages": [
+              "concepts/filter-definitions",
+              "concepts/filter-types",
+              "concepts/boolean-filters",
+              "concepts/custom-filters",
+              "concepts/nested-fields",
+              "concepts/type-inference"
+            ]
+          },
+          {
+            "group": "Adapters",
+            "pages": [
+              "adapters/in-memory",
+              "adapters/drizzle",
+              "adapters/bigquery"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/migration-v2",
+              "guides/building-adapters",
+              "guides/best-practices"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Core",
+            "pages": [
+              "api/core/types",
+              "api/core/filter-kinds"
+            ]
+          },
+          {
+            "group": "In-Memory",
+            "pages": [
+              "api/in-memory/filter",
+              "api/in-memory/helpers"
+            ]
+          },
+          {
+            "group": "Drizzle",
+            "pages": [
+              "api/drizzle/filter"
+            ]
+          },
+          {
+            "group": "BigQuery",
+            "pages": [
+              "api/bigquery/filter"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Type-safe filter definitions with full TypeScript inference",
+    "Multiple backend adapters (in-memory, Drizzle ORM, BigQuery)",
+    "Composable AND/OR boolean logic",
+    "Custom filter functions per adapter",
+    "Nested field filtering with dot notation",
+    "Zero lock-in architecture"
+  ],
+  "publicApiSurface": [
+    "inMemoryFilter",
+    "drizzleFilter",
+    "bigqueryFilter",
+    "makeFilterHelpers",
+    "InMemoryFilterInput",
+    "DrizzleFilterInput",
+    "BigQueryFilterInput",
+    "CoreFilterDef",
+    "PrimitiveFilter",
+    "BooleanFilter"
+  ]
+}
